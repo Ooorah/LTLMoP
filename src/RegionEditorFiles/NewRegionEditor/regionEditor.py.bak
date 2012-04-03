@@ -14,7 +14,6 @@ import struct
 import copy
 import winsound
 import pyttsx
-from regionEditor import Point
 
 # begin wxGlade: extracode
 # end wxGlade
@@ -78,16 +77,16 @@ class regionEditor(wx.Frame):
         self.sidebar = wx.Panel(self, -1)
         self.toggleVicon = wx.ToggleButton(self.sidebar, -1, "Vicon")
         self.buttonCamera = wx.Button(self.sidebar, -1, "Camera")
-        self.toggleSquare = wx.ToggleButton(self.sidebar, -1, "Rect.")
+        self.toggleSquare = wx.ToggleButton(self.sidebar, -1, "Square")
         self.togglePoly = wx.ToggleButton(self.sidebar, -1, "Polygon")
-        self.toggleDim = wx.ToggleButton(self.sidebar, -1, "Length")
+        self.toggleDim = wx.ToggleButton(self.sidebar, -1, "Dimen.")
         self.toggleFeedback = wx.ToggleButton(self.sidebar, -1, "Feedback")
         self.buttonCal = wx.Button(self.sidebar, -1, "Calibrate")
         self.canvas = wx.Panel(self, -1, style=wx.SUNKEN_BORDER | wx.TAB_TRAVERSAL)
-
+        
         self.__set_properties()
         self.__do_layout()
-
+        
         self.Bind(wx.EVT_MENU, self.OnMenuNew, self.menuNew)
         self.Bind(wx.EVT_MENU, self.OnMenuOpen, self.menuOpen)
         self.Bind(wx.EVT_MENU, self.OnMenuSave, self.menuSave)
@@ -248,10 +247,6 @@ class regionEditor(wx.Frame):
         # Switch Vicon streaming on or off based on state of toggle button
         if self.toggleVicon.GetValue():
             self.viconListener.start()
-            
-            # TODO: Add while loop to wait for data to come in
-            #       If it times out print message
-            #       If data comes in, zoom out to ensure all markers seen
         else:
             self.viconListener.stop()
             # Reinitialize thread to enable restarting it
@@ -595,12 +590,14 @@ class regionEditor(wx.Frame):
     
     # TODO: May need to handle all mouse events in one huge window
     #       to avoid having the double click interfere with regular clicking
-    #def OnMouseLeftDClick(self, event):
-    #    """Perform action based on current mode of operation."""
-    #    # Creating a polygonal region
-    #    if self.togglePoly.GetValue() and self.polyVerts and \
-    #            len(self.polyVerts) > 2:
-    #        self.CreateRegion()
+    """
+    def OnMouseLeftDClick(self, event):
+        """Perform action based on current mode of operation."""
+        # Creating a polygonal region
+        if self.togglePoly.GetValue() and self.polyVerts and \
+                len(self.polyVerts) > 2:
+            self.CreateRegion()
+    """
     
     def OnMouseRightDown(self, event):
         """Save the right click point so it can be used later."""
@@ -1278,11 +1275,8 @@ class Region:
     def __init__(self, points, name="R0", rgb=[0, 0, 0]):   # TODO: random color/name
         """Create an object to represent a region.
 
-        points - List of tuples of floats containing vertex information
+        points - List of tuples containing vertex information
                  [(x1, y1), (x2, y2), ...]
-        name - String defining region name
-        rgb - List of integers defining color
-              [red, green, blue], each with value in range [0 255]
         """
         # TODO: Add name, color, convex/concave, possibly adjoining edges
         self.verts = points

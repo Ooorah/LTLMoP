@@ -386,7 +386,8 @@ class RegionFileInterface:
 
         self.regions = []
         for region in data["Regions"]:
-            regionData = region.split("\t");
+            region = re.sub('[\[\]\(\)\{\}]', '', region)   # Remove brackets
+            regionData = region.split();    # Separates on any whitespace
             newRegion = Region()
             newRegion.setData(regionData, thorough=False)    
             newRegion.alignmentPoints = [False] * len([x for x in newRegion.getPoints()])
@@ -626,7 +627,65 @@ class Region:
 
         if thorough:
             self.isObstacle = data[9]
+    
+    def setDataFromFile(self, data):
+        """ Set the object's internal data.
 
+            'data' is a copy of the object's saved data, different from the 
+            return from getData above. This is only used for reading from the 
+            new region file format.
+        """
+        self.name              = data[0]
+
+        # All regions are polygons
+        self.type = reg_POLY
+        
+        # Assign color
+        self.color = Color(red=int(data[1]),
+                           green=int(data[2]),
+                           blue=int(data[3]))
+        
+        # Extract all region points and find bounding box corners
+        pts = list()
+        minx = float(data[4])
+        maxx = minx
+        miny = float(data[5])
+        maxy = miny
+        for i in range(4, len(data), 2):
+            x = float(data[i])
+            y = float(data[i+1])
+            minx = min(minx, x)
+            maxx = max(maxx, x)
+            miny = min(miny, y)
+            maxy = max(maxy, y)
+            pts.append((x, y))
+        
+        
+        
+        self.position          = Point(int(data[2]), int(data[3]))
+        self.size              = Size(int(data[4]), int(data[5]))
+        self.color             = Color(red=int(data[6]),
+                                         green=int(data[7]),
+                                          blue=int(data[8]))
+        if self.type == reg_POLY:
+            self.pointArray = []
+            if thorough:
+                self.alignmentPoints = []
+                for i in range(10, len(data), 3):
+                    self.pointArray.append(Point(int(data[i]), int(data[i+1])))
+                    self.alignmentPoints.append(data[i+2])
+            else:
+                for i in range(9, len(data), 2):
+                    self.pointArray.append(Point(int(data[i]), int(data[i+1])))
+        elif self.type == reg_RECT:
+            if thorough:
+                self.alignmentPoints = []
+                for i in range(10, len(data), 1):
+                    self.alignmentPoints.append(data[i])
+
+        if thorough:
+            self.isObstacle = data[9]
+    
     def getFaces(self):
         """
         Wrapper function to allow for iteration over faces of regions.

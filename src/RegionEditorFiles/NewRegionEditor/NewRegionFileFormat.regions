@@ -1,0 +1,20 @@
+# This is a region definition file for the LTLMoP toolkit.
+# Format details are described at the beginning of each section below.
+# Note that all values are separated by *tabs*.
+
+Background: # Relative path of background image file
+None
+
+Obstacles: # Indices of regions to treat as obstacles
+
+Regions: # Name {ColorR ColorG ColorB} [(x1 y1) (x2 y2) ...]
+boundary	{0	255	0}	[(0.0	2.0)	(4.0	2.0)	(4.0	-2.0)	(0.0	-2.0)]
+rA	{255	0	0}	[(1.0	1.0)	(2.0	0.0)	(1.0	-1.0)]
+rB	{0	0	255}	[(1.0	1.0)	(1.0	-1.0)	(0.2	0.0)]
+
+Thumbnail: # Relative path of image file that has region shapes overlayed on background image
+NewRegionFileFormat.png
+
+Transitions: # Region1Idx Region2Idx [(Reg1FaceIdx1 Reg2FaceIdx1) (Reg1FaceIdx2 Reg2FaceIdx2) ...]
+1	2	[(2	0)]
+2	1	[(0	2)]
