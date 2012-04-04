@@ -12,9 +12,9 @@ import threading
 import socket
 import struct
 import copy
+import random
 import winsound
 import pyttsx
-from regionEditor import Point
 
 # begin wxGlade: extracode
 # end wxGlade
@@ -823,11 +823,12 @@ class regionEditor(wx.Frame):
             toggleStay.SetValue(state)
 
     def CreateRegion(self):
-        """Instantiate and create a region from, perform cleanup actions.
+        """Instantiate and create a region, perform cleanup actions.
         Use polyVerts and polyAdjEdges to make the region and find transitions.
         """
         # Create region
-        region = Region(self.polyVerts)     # TODO: Add name and color to regions
+        rName = 'r' + str(len(self.regions))
+        region = Region(self.polyVerts, rName)  # TODO: Add color to regions
         self.regions.append(region)
         idxNewReg = len(self.regions) - 1
         # Add row and column to list of lists of lists representing adjacency
@@ -1275,7 +1276,7 @@ class FeedbackDialog(wx.Dialog):
 
 
 class Region:
-    def __init__(self, points, name="R0", rgb=[0, 0, 0]):   # TODO: random color/name
+    def __init__(self, points, name, rgb=None):   # TODO: random color/name
         """Create an object to represent a region.
 
         points - List of tuples of floats containing vertex information
@@ -1287,6 +1288,9 @@ class Region:
         # TODO: Add name, color, convex/concave, possibly adjoining edges
         self.verts = points
         self.name = name
+        if not rgb:
+            rgb = [random.randint(0, 255), random.randint(0, 255), \
+                random.randint(0,255)]
         self.color = rgb
     
     def __str__(self):

@@ -141,6 +141,8 @@ class RegionFileInterface:
 
     Overview of exposed data structures:
 
+        - parent (Object): Creator of this rfi
+            * if created by specEditor, this needs to be set so calibration can be done
         - background (string): relative path of background image file
         - regions (list): list of Region objects, with properties defined below
         - transitions (list of lists):
@@ -149,7 +151,8 @@ class RegionFileInterface:
             * values = Lists of faces connecting the two regions
     """
 
-    def __init__(self, background="None", regions=[], transitions=None):
+    def __init__(self, parent=None, background="None", regions=[], transitions=None):
+        self.parent = parent
         self.background = background
         self.regions = regions
         self.transitions = transitions
@@ -384,43 +387,140 @@ class RegionFileInterface:
         except KeyError:
             self.background = "None"
 
+        # Set all region information from lines in file
+        # Each region line format is this:
+        #   Name {ColorR ColorG ColorB} [(x1 y1) (x2 y2) ...]
+        regionDataList, boundingBoxList, scalex, scaley, offsetx, offsety = \
+            self.calcMapCalibFromFile(data["Regions"])
         self.regions = []
-        for region in data["Regions"]:
-            region = re.sub('[\[\]\(\)\{\}]', '', region)   # Remove brackets
-            regionData = region.split();    # Separates on any whitespace
+        for i, regionData in enumerate(regionDataList):
             newRegion = Region()
-            newRegion.setData(regionData, thorough=False)    
-            newRegion.alignmentPoints = [False] * len([x for x in newRegion.getPoints()])
+            newRegion.setDataFromFile(regionData, boundingBoxList[i], \
+                                      scalex, scaley, offsetx, offsety)
             self.regions.append(newRegion)
 
         # Make an empty adjacency matrix of size (# of regions) x (# of regions)
         self.transitions = [[[] for j in range(len(self.regions))] for i in range(len(self.regions))]
+        
+        # Assign region transitions
+        # Each transition line format is this:
+        # Region1Idx Region2Idx [(Reg1FaceIdx1 Reg2FaceIdx1) (Reg1FaceIdx2 Reg2FaceIdx2) ...]
         for transition in data["Transitions"]:
-            transData = transition.split("\t");
-            region1 = self.indexOfRegionWithName(transData[0])
-            region2 = self.indexOfRegionWithName(transData[1])
+            transData = re.sub('[\[\]\(\)]', '', transData) # Remove brackets
+            transData = transition.split();     # Separate on any whitespace
+            region1 = int(transData[0])
+            region2 = int(transData[1])
             faces = []
-            for i in range(2, len(transData), 4):
-                p1 = Point(int(transData[i]), int(transData[i+1]))
-                p2 = Point(int(transData[i+2]), int(transData[i+3]))
+            # All transitions between regions
+            for i in range(2, len(transData), 2):
+                r1face = int(transData[i])
+                # Points surrounding face i are point[i] and point[i+1]
+                # except for last face, which has point[i] and point[0]
+                # Must account for local region coordinates
+                p1 = self.regions[region1].pointArray[r1face] + \
+                    self.regions[region1].position
+                if r1face < len(self.regions[region1].pointArray) - 1:
+                    p2 = self.regions[region1].pointArray[r1face+1] + \
+                        self.regions[region1].position
+                else:
+                    p2 = self.regions[region1].pointArray[0]+ \
+                        self.regions[region1].position
                 faces.append(tuple(sorted((p1, p2))))
                 
-            # During adjacency matrix reconstruction, we'll mirror over the diagonal
+            # Note that region file specifies transitions in both directions
+            # So mirroring here is unnecessary
             self.transitions[region1][region2] = faces
-            self.transitions[region2][region1] = faces
-
-        if "CalibrationPoints" in data:
-            for point in data["CalibrationPoints"]:
-                [name, index] = point.split("\t")
-                self.regions[self.indexOfRegionWithName(name)].alignmentPoints[int(index)] = True
-
+        
+        # Skip making calibration points since calibration is already done
+        #if "CalibrationPoints" in data:
+        #    for point in data["CalibrationPoints"]:
+        #        [name, index] = point.split("\t")
+        #        self.regions[self.indexOfRegionWithName(name)].alignmentPoints[int(index)] = True
+        
+        # Set calibration of map
+        try:
+            for setupID in range(len(self.parent.simSetup)):
+                self.parent.simSetup[setupID]["XScale"] = scalex
+                self.parent.simSetup[setupID]["XOffset"] = offsetx
+                self.parent.simSetup[setupID]["YScale"] = scaley
+                self.parent.simSetup[setupID]["YOffset"] = offsety
+        except:
+            print "Warning: Calibration not set properly in specEditor"
+                
+        
+        # Set "obstacleness" of regions
         if "Obstacles" in data:
-            for rname in data["Obstacles"]:
-                self.regions[self.indexOfRegionWithName(rname)].isObstacle = True
-            
+            for ridx in data["Obstacles"]:
+                self.regions[ridx].isObstacle = True
+
         self.filename = filename
 
         return True
+    
+    def calcMapCalibFromFile(self, dataFromAllRegions):
+        """
+        Parse the region data, saving it to a more usable format.
+        Calculate the map scale and offset.
+        
+        returns regionDataList, boundingBoxList, scalex, scaley, offsetx, offsety
+            regionDataList - List of lists containing region data
+                Inner lists contain information for one region in the format:
+                [string name, int colorR, int colorG, int colorB, float x1, \
+                 float y1, float x2, float y2, ...]
+            boundingBoxList - List of tuples containing region bound info
+                Tuples define upper left corner and size of region in format:
+                (minx, maxy, width, height)
+            *Note that all information for regionDataList and boundingBoxList
+             is in absolute coordinates (e.g. meters) not pixels
+            scales and offsets are related by:
+                position = pointPixels * scale + offset
+        """
+        regionDataList = []
+        boundingBoxList = []
+        minxAll = float(dataFromAllRegions[0][4])
+        maxxAll = minxAll
+        minyAll = float(dataFromAllRegions[0][5])
+        maxyAll = minyAll
+        for region in dataFromAllRegions:
+            region = re.sub('[\[\]\(\)\{\}]', '', region)   # Remove brackets
+            regionData = region.split()     # Separates on any whitespace
+            for i in range(1, 4):   # Convert colors to integers
+                regionData[i] = int(regionData[i])
+            # Extract all region points and calculate bounding box
+            minx = float(regionData[4])
+            maxx = minx
+            miny = float(regionData[5])
+            maxy = miny
+            for i in range(4, len(regionData), 2):
+                x = float(regionData[i])
+                y = float(regionData[i+1])
+                regionData[i] = x
+                regionData[i+1] = y
+                minx = min(minx, x)
+                maxx = max(maxx, x)
+                miny = min(miny, y)
+                maxy = max(maxy, y)
+            
+            # Save region information
+            regionDataList.append(regionData)
+            boundingBoxList.append((minx, maxy, maxx - minx, maxy - miny))
+            
+            # Update map bounds
+            minxAll = min(minxAll, minx)
+            maxxAll = max(maxxAll, maxx)
+            minyAll = min(minyAll, miny)
+            maxyAll = max(maxyAll, maxy)
+        
+        # Define scale and offset
+        # position = pointPixels * scale + offset
+        sizex = 1000.0  # Map display size (pix)
+        sizey = 1000.0  # Based on previous region editor
+        scalex = (maxxAll - minxAll) / sizex
+        scaley = -(maxyAll - minyAll) / sizey
+        offsetx = minxAll
+        offsety = maxyAll
+        
+        return regionDataList, boundingBoxList, scalex, scaley, offsetx, offsety
    
 ############################################################
  
@@ -457,7 +557,49 @@ class Region:
         self.pointArray        = points
         self.alignmentPoints   = [False] * len([x for x in self.getPoints()])
         self.isObstacle = False
-
+    
+    def __str__(self):
+        """
+        String representation of region object.
+        """
+        
+        # Name
+        outstr = self.name + ":\n"
+        
+        # Type
+        if self.type == reg_POLY:
+            outstr += "Polygon\n"
+        else:
+            outstr += "Rectangle\n"
+        
+        # Color
+        outstr += "Color RGB = [%d, %d, %d]\n" % self.color.Get()
+        
+        # Position
+        outstr += "Bounding box corner at: (%d, %d)\n" % \
+            (self.position.x, self.position.y)
+        
+        # Size
+        outstr += "Width = %d, Height = %d\n" % \
+            (self.size.width, self.size.height)
+        
+        # Vertices
+        outstr += "Points:"
+        for pt in self.pointArray:
+            outstr += " (%d, %d)" % (pt.x, pt.y)
+        outstr += "\n"
+        
+        # Alignment Points
+        outstr += "Alignment Points: "
+        for isAlPt in self.alignmentPoints:
+            outstr += " %s" % isAlPt
+        outstr += "\n"
+        
+        # Obstacle
+        outstr += "Is an obstacle: %s" % self.isObstacle
+        
+        return outstr
+    
     # =================================
     # == Region Manipulation Methods ==
     # =================================
@@ -628,63 +770,52 @@ class Region:
         if thorough:
             self.isObstacle = data[9]
     
-    def setDataFromFile(self, data):
+    def setDataFromFile(self, data, boundBox, scalex, scaley, offsetx, offsety):
         """ Set the object's internal data.
 
             'data' is a copy of the object's saved data, different from the 
             return from getData above. This is only used for reading from the 
             new region file format.
+            
+            data - List containing information in the format:
+                [string name, int colorR, int colorG, int colorB, float x1, \
+                 float y1, float x2, float y2, ...]
+            boundBox - Tuple defining upper left corner and size in format:
+                (minx, maxy, width, height)
+            *Note that all information for regionDataList and boundingBoxList
+             is in absolute coordinates (e.g. meters) not pixels
+            scales and offsets are related by:
+                position = pointPixels * scale + offset
         """
-        self.name              = data[0]
+        self.name = data[0]
 
         # All regions are polygons
         self.type = reg_POLY
         
         # Assign color
-        self.color = Color(red=int(data[1]),
-                           green=int(data[2]),
-                           blue=int(data[3]))
+        self.color = Color(red=data[1], green=data[2], blue=data[3])
         
-        # Extract all region points and find bounding box corners
-        pts = list()
-        minx = float(data[4])
-        maxx = minx
-        miny = float(data[5])
-        maxy = miny
+        # Translate bounding box information
+        positionxPix = int((boundBox[0] - offsetx) / scalex)
+        positionyPix = int((boundBox[1] - offsety) / scaley)
+        widthPix = int(boundBox[2] / scalex)
+        heightPix = int(boundBox[3] / -scaley)
+        self.position = Point(positionxPix, positionyPix)
+        self.size = Size(widthPix, heightPix)
+        
+        # Define region vertices and alignment points
+        # They must be translated from real units (e.g. meters)
+        # and made relative to bounding box
+        self.pointArray = []
+        self.alignmentPoints = []
         for i in range(4, len(data), 2):
-            x = float(data[i])
-            y = float(data[i+1])
-            minx = min(minx, x)
-            maxx = max(maxx, x)
-            miny = min(miny, y)
-            maxy = max(maxy, y)
-            pts.append((x, y))
+            xPix = int((data[i] - offsetx) / scalex) - positionxPix
+            yPix = int((data[i+1] - offsety) / scaley) - positionyPix
+            self.pointArray.append(Point(xPix, yPix))
+            self.alignmentPoints.append(False)  # No calibration points yet
         
-        
-        
-        self.position          = Point(int(data[2]), int(data[3]))
-        self.size              = Size(int(data[4]), int(data[5]))
-        self.color             = Color(red=int(data[6]),
-                                         green=int(data[7]),
-                                          blue=int(data[8]))
-        if self.type == reg_POLY:
-            self.pointArray = []
-            if thorough:
-                self.alignmentPoints = []
-                for i in range(10, len(data), 3):
-                    self.pointArray.append(Point(int(data[i]), int(data[i+1])))
-                    self.alignmentPoints.append(data[i+2])
-            else:
-                for i in range(9, len(data), 2):
-                    self.pointArray.append(Point(int(data[i]), int(data[i+1])))
-        elif self.type == reg_RECT:
-            if thorough:
-                self.alignmentPoints = []
-                for i in range(10, len(data), 1):
-                    self.alignmentPoints.append(data[i])
-
-        if thorough:
-            self.isObstacle = data[9]
+        # Set "obstacleness" of region
+        self.isObstacle = False;                # No obstacles yet
     
     def getFaces(self):
         """

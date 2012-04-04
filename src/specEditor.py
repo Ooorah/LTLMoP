@@ -432,7 +432,8 @@ class SpecEditorFrame(wx.Frame):
                                   flags = wx.OPEN | wx.FILE_MUST_EXIST)
         if filename == "": return
         
-        rfi = RegionFileInterface()
+        rfi = RegionFileInterface(parent=self)
+
 
         # Try loading the file
         if not rfi.readFile(filename):
