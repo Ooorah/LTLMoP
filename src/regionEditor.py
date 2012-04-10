@@ -169,6 +169,8 @@ class regionEditor(wx.Frame):
         self.polySnaps = []                 # Keeps snap information for each
                                             # new region creation point
                                             # [(idxReg, idxPt, idxEdge), ...]
+        self.boundary = None                # Region representing the map bound
+        # TODO: When changing the name of a region, check if it is called boundary
         
         # Set up for undo/redo capabilities
         # TODO: Disable self.menuUndo and self.menuRedo
@@ -306,6 +308,10 @@ class regionEditor(wx.Frame):
             f.write("\n\n")         # TODO: Support for obstacles
             f.write("Regions: # Name {ColorR ColorG ColorB} " + \
                 "[(x1 y1) (x2 y2) ...]\n")
+            if not self.boundary:
+                self.Autoboundary()
+            if self.boundary:       # Check in case there were no regions
+                f.write(str(self.boundary) + "\n")
             for reg in self.regions:
                 f.write(str(reg) + "\n")
             f.write("\n")
@@ -931,6 +937,27 @@ class regionEditor(wx.Frame):
                 elif thisRegFace == iEdge:
                     self.adjacent[jReg][iReg].\
                         append((otherRegFace, thisRegFace + 1))
+    
+    def Autoboundary(self):
+        """Automatically create region representing the boundary of the map."""
+        # Check that there are regions first
+        if self.regions:
+            # Find extrema of map
+            minx = float('inf')
+            maxx = float('-inf')
+            miny = float('inf')
+            maxy = float('-inf')
+            for reg in self.regions:
+                for pt in reg.verts:
+                    minx = min(minx, pt.x)
+                    maxx = max(maxx, pt.x)
+                    miny = min(miny, pt.y)
+                    maxy = max(maxy, pt.y)
+            
+            # Create region
+            points = [Point(minx, maxy), Point(maxx, maxy), \
+                Point(maxx, miny), Point(minx, miny)]
+            self.boundary = Region(points, 'boundary')
 
     def AddToUndo(self, action):
         """Add specified action to the undo queue.

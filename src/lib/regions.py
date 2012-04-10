@@ -406,7 +406,7 @@ class RegionFileInterface:
         # Each transition line format is this:
         # Region1Idx Region2Idx [(Reg1FaceIdx1 Reg2FaceIdx1) (Reg1FaceIdx2 Reg2FaceIdx2) ...]
         for transition in data["Transitions"]:
-            transData = re.sub('[\[\]\(\)]', '', transData) # Remove brackets
+            transition = re.sub('[\[\]\(\)]', '', transition) # Remove brackets
             transData = transition.split();     # Separate on any whitespace
             region1 = int(transData[0])
             region2 = int(transData[1])
@@ -477,20 +477,22 @@ class RegionFileInterface:
         """
         regionDataList = []
         boundingBoxList = []
-        minxAll = float(dataFromAllRegions[0][4])
-        maxxAll = minxAll
-        minyAll = float(dataFromAllRegions[0][5])
-        maxyAll = minyAll
+        print dataFromAllRegions
+        minxAll = float("inf")
+        maxxAll = float("-inf")
+        minyAll = float("inf")
+        maxyAll = float("-inf")
         for region in dataFromAllRegions:
             region = re.sub('[\[\]\(\)\{\}]', '', region)   # Remove brackets
             regionData = region.split()     # Separates on any whitespace
             for i in range(1, 4):   # Convert colors to integers
                 regionData[i] = int(regionData[i])
             # Extract all region points and calculate bounding box
-            minx = float(regionData[4])
-            maxx = minx
-            miny = float(regionData[5])
-            maxy = miny
+            minx = float("inf")
+            maxx = float("-inf")
+            miny = float("inf")
+            maxy = float("-inf")
+            
             for i in range(4, len(regionData), 2):
                 x = float(regionData[i])
                 y = float(regionData[i+1])
