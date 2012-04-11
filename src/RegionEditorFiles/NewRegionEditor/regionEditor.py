@@ -633,7 +633,6 @@ class regionEditor(wx.Frame):
             
             # Do something about that region selection
             if iRegInner != -1:
-                print "Inside region ", iRegInner
                 # Selecting single region
                 if not event.CmdDown():
                     self.selectedRegions = []
@@ -649,7 +648,6 @@ class regionEditor(wx.Frame):
             
             # Clear all region selections
             else:
-                print "Outside regions"
                 self.selectedRegions = []
             self.RedrawCanvas()
     
@@ -665,6 +663,17 @@ class regionEditor(wx.Frame):
         if self.togglePoly.GetValue() and self.polyVerts and \
                 len(self.polyVerts) > 2:
             self.CreateRegion()
+        
+        # Editing a region
+        if self.selectedRegions and not self.toggleSquare.GetValue() and \
+                not self.togglePoly.GetValue() and \
+                not self.toggleDim.GetValue():
+            # Edit the latest selected region
+            iReg = self.selectedRegions.pop()
+            self.selectedRegions = []
+            self.selectedRegions.append(iReg)
+            self.EditRegion(iReg)
+            
     
     def OnMouseRightDown(self, event):
         """Save the right click point so it can be used later."""
@@ -1016,6 +1025,47 @@ class regionEditor(wx.Frame):
                 elif thisRegFace == iEdge:
                     self.adjacent[jReg][iReg].\
                         append((otherRegFace, thisRegFace + 1))
+    
+    def EditRegion(self, iReg):
+        """Show the edit region dialog.
+        Allow user to change name, color, and obstacleness of a region.
+        
+        iReg - Index of region to edit
+        """
+        # Create dialog
+        regEdDia = RegionEditDialog(self, wx.ID_ANY, "Edit Region Information")
+        
+        # Set appropriate control values
+        regEdDia.textName.SetValue(self.regions[iReg].name)
+        regEdDia.colorPicker.SetColour(self.regions[iReg].color)
+        regEdDia.chkbxObst.SetValue(self.regions[iReg].isObstacle)
+        
+        # Wait for user to close the dialog
+        done = False
+        while not done:
+            answer = regEdDia.ShowModal()
+            # User canceled
+            if answer == wx.ID_CANCEL:
+                regEdDia.Destroy()
+                done = True
+            # Same name or unique new name
+            elif regEdDia.textName.GetValue() == self.regions[iReg].name or \
+                    regEdDia.textName.GetValue() not in \
+                    [r.name for r in self.regions]:
+                self.regions[iReg].name = regEdDia.textName.GetValue()
+                self.regions[iReg].color = regEdDia.colorPicker.GetColour()
+                self.regions[iReg].isObstacle = regEdDia.chkbxObst.GetValue()
+                regEdDia.Destroy()
+                done = True
+            # Non-unique name - needs to re-edit
+            else:
+                wx.MessageBox("Region with name \"%s\" already exists." % \
+                    (regEdDia.textName.GetValue()), "Error", \
+                    style = wx.OK | wx.ICON_ERROR)
+        
+        # Redraw the regions to ensure correct name/color
+        self.RedrawCanvas()
+        # TODO: Add to undo
     
     def Autoboundary(self):
         """Automatically create region representing the boundary of the map."""
@@ -1396,9 +1446,53 @@ class FeedbackDialog(wx.Dialog):
             self.currPt = 0
 # end of class FeedbackDialog
 
+class RegionEditDialog(wx.Dialog):
+    def __init__(self, *args, **kwds):
+        # begin wxGlade: RegionEditDialog.__init__
+        kwds["style"] = wx.DEFAULT_DIALOG_STYLE
+        wx.Dialog.__init__(self, *args, **kwds)
+        self.label_1 = wx.StaticText(self, -1, "Name: ")
+        self.textName = wx.TextCtrl(self, -1, "")
+        self.label_2 = wx.StaticText(self, -1, "Color: ")
+        self.colorPicker = wx.ColourPickerCtrl(self, -1)
+        self.chkbxObst = wx.CheckBox(self, -1, "Treat as obstacle")
+        self.buttonOk = wx.Button(self, wx.ID_OK, "OK")
+        self.buttonCancel = wx.Button(self, wx.ID_CANCEL, "Cancel")
+
+        self.__set_properties()
+        self.__do_layout()
+        # end wxGlade
+
+    def __set_properties(self):
+        # begin wxGlade: RegionEditDialog.__set_properties
+        self.SetTitle("Edit Region")
+        self.colorPicker.SetMinSize((40, 40))
+        # end wxGlade
+
+    def __do_layout(self):
+        # begin wxGlade: RegionEditDialog.__do_layout
+        sizer_2 = wx.BoxSizer(wx.VERTICAL)
+        sizer_5 = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_4 = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_3 = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_3.Add(self.label_1, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_3.Add(self.textName, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_2.Add(sizer_3, 1, wx.EXPAND, 0)
+        sizer_4.Add(self.label_2, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_4.Add(self.colorPicker, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_2.Add(sizer_4, 1, wx.EXPAND, 0)
+        sizer_2.Add(self.chkbxObst, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
+        sizer_5.Add(self.buttonOk, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_5.Add(self.buttonCancel, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 8)
+        sizer_2.Add(sizer_5, 1, wx.EXPAND, 0)
+        self.SetSizer(sizer_2)
+        sizer_2.Fit(self)
+        self.Layout()
+        # end wxGlade
+# end of class RegionEditDialog
 
 class Region:
-    def __init__(self, points, name, rgb=None):   # TODO: random color/name
+    def __init__(self, points, name, rgb=None):
         """Create an object to represent a region.
 
         points - List of Points containing vertex information
@@ -1407,18 +1501,19 @@ class Region:
         rgb - List of integers defining color
               [red, green, blue], each with value in range [0 255]
         """
-        # TODO: Add name, color, convex/concave, possibly adjoining edges
+        # TODO: Add convex/concave
         self.verts = points
         self.name = name
         if not rgb:
             rgb = [random.randint(0, 255), random.randint(0, 255), \
                 random.randint(0,255)]
-        self.color = rgb
+        self.color = wx.Colour(rgb[0], rgb[1], rgb[2])
+        self.isObstacle = False
     
     def __str__(self):
         """Representation of object."""
-        s = "%s\t{%03d\t%03d\t%03d}\t[" % \
-            (self.name, self.color[0], self.color[1], self.color[2])
+        s = "%s\t{%03d\t%03d\t%03d}\t[" % (self.name, self.color.Red(), \
+            self.color.Green(), self.color.Blue())
         for iPt, pt in enumerate(self.verts):
             s += str(pt)
             if iPt < len(self.verts) - 1:
