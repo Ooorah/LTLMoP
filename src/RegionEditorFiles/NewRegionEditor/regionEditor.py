@@ -668,11 +668,14 @@ class regionEditor(wx.Frame):
         if self.selectedRegions and not self.toggleSquare.GetValue() and \
                 not self.togglePoly.GetValue() and \
                 not self.toggleDim.GetValue():
+            # Unset double-click flag since event does not propagate here
+            self.justDoubleClicked = False
+            
             # Edit the latest selected region
             iReg = self.selectedRegions.pop()
             self.selectedRegions = []
             self.selectedRegions.append(iReg)
-            self.EditRegion(iReg)
+            self.EditRegion(self.regions[iReg])
             
     
     def OnMouseRightDown(self, event):
@@ -1026,19 +1029,19 @@ class regionEditor(wx.Frame):
                     self.adjacent[jReg][iReg].\
                         append((otherRegFace, thisRegFace + 1))
     
-    def EditRegion(self, iReg):
+    def EditRegion(self, reg):
         """Show the edit region dialog.
         Allow user to change name, color, and obstacleness of a region.
         
-        iReg - Index of region to edit
+        reg - Region to edit
         """
         # Create dialog
         regEdDia = RegionEditDialog(self, wx.ID_ANY, "Edit Region Information")
         
         # Set appropriate control values
-        regEdDia.textName.SetValue(self.regions[iReg].name)
-        regEdDia.colorPicker.SetColour(self.regions[iReg].color)
-        regEdDia.chkbxObst.SetValue(self.regions[iReg].isObstacle)
+        regEdDia.textName.SetValue(reg.name)
+        regEdDia.colorPicker.SetColour(reg.color)
+        regEdDia.chkbxObst.SetValue(reg.isObstacle)
         
         # Wait for user to close the dialog
         done = False
@@ -1049,12 +1052,12 @@ class regionEditor(wx.Frame):
                 regEdDia.Destroy()
                 done = True
             # Same name or unique new name
-            elif regEdDia.textName.GetValue() == self.regions[iReg].name or \
+            elif regEdDia.textName.GetValue() == reg.name or \
                     regEdDia.textName.GetValue() not in \
                     [r.name for r in self.regions]:
-                self.regions[iReg].name = regEdDia.textName.GetValue()
-                self.regions[iReg].color = regEdDia.colorPicker.GetColour()
-                self.regions[iReg].isObstacle = regEdDia.chkbxObst.GetValue()
+                reg.name = regEdDia.textName.GetValue()
+                reg.color = regEdDia.colorPicker.GetColour()
+                reg.isObstacle = regEdDia.chkbxObst.GetValue()
                 regEdDia.Destroy()
                 done = True
             # Non-unique name - needs to re-edit
