@@ -504,9 +504,9 @@ class regionEditor(wx.Frame):
                 x0 = self.polyVerts[0].x
                 y0 = self.polyVerts[0].y
                 pt1, iReg1, iPt1, iEd1, snapped1 = \
-                    self.SnapRegions(Point(x0, pt.y), False)
+                    self.SnapRegions(Point(x0, pt.y))
                 pt3, iReg3, iPt3, iEd3, snapped3 = \
-                    self.SnapRegions(Point(pt.x, y0), False)
+                    self.SnapRegions(Point(pt.x, y0))
                 # Move clicked points if other vertices snap and they don't
                 if snapped1:
                     if iReg == -1:
@@ -602,18 +602,27 @@ class regionEditor(wx.Frame):
         elif self.selectedRegions and \
                 pt.Dist(self.leftClickPt) > self.tolerance:
             self.leftClickPt, iReg, iPt, iEd, snapped = \
-                self.SnapRegions(self.leftClickPt, False)
+                self.SnapRegions(self.leftClickPt)
             iRegInner = self.InsideRegions(self.leftClickPt)
             
             # Dragging point(s)
-            if iPt != -1:
-                # TODO: Change point(s) position and check adjacencies
-                pass
+            if iReg in self.selectedRegions and iPt != -1:
+                # Change point position and check adjacencies
+                self.regions[iReg].verts[iPt].Set(pt.x, pt.y)
+                self.RecalcAdjacency(iReg)
+                self.RedrawCanvas()
             
             # Dragging region(s)
-            elif iReg != -1 or iRegInner != -1:
-                # TODO: Change region(s) position and check adjacencies
-                pass
+            elif iReg in self.selectedRegions or \
+                    iRegInner in self.selectedRegions:
+                # Change region(s) position and check adjacencies
+                delta = pt - self.leftClickPt
+                for iRegSel in self.selectedRegions:
+                    for iPt in range(len(self.regions[iRegSel].verts)):
+                        self.regions[iRegSel].verts[iPt] += delta
+                for iRegSel in self.selectedRegions:
+                    self.RecalcAdjacency(iRegSel)
+                self.RedrawCanvas()
         
         # Panning the map view
         elif pt.Dist(self.leftClickPt) > self.tolerance:
@@ -651,8 +660,6 @@ class regionEditor(wx.Frame):
                 self.selectedRegions = []
             self.RedrawCanvas()
     
-    # TODO: May need to handle all mouse events in one huge window
-    #       to avoid having the double click interfere with regular clicking
     def OnMouseLeftDClick(self, event):
         """Perform action based on current mode of operation."""
         
@@ -703,12 +710,20 @@ class regionEditor(wx.Frame):
             self.canvasScale.y * (1 - scaler) + self.canvasOffset.y)
         self.canvasScale = self.canvasScale * scaler
         self.RedrawCanvas()
-
+    
     def OnKeyDown(self, event):
         keycode = event.GetKeyCode()
         
-        # Backspace/Delete - Removes last set point during region creation
+        # Backspace/Delete - Deletes selected regions
         if (keycode == wx.WXK_BACK or keycode == wx.WXK_DELETE) and \
+                self.selectedRegions and not self.togglePoly.GetValue() and \
+                not self.toggleSquare.GetValue():
+            self.selectedRegions.sort()
+            while self.selectedRegions:
+                self.DeleteRegion(self.selectedRegions.pop())
+        
+        # Backspace/Delete - Removes last set point during region creation
+        elif (keycode == wx.WXK_BACK or keycode == wx.WXK_DELETE) and \
                 self.polyVerts:
             if self.toggleSquare.GetValue() or self.togglePoly.GetValue():
                 self.polyVerts.pop()
@@ -723,19 +738,19 @@ class regionEditor(wx.Frame):
             self.ResetMapToggles()
         
         # Ctrl+n - New
-        if event.CmdDown() and keycode == 78:
+        elif event.CmdDown() and keycode == 78:
             self.OnMenuNew(None)
         
         # Ctrl+o - Open
-        if event.CmdDown() and keycode == 79:
+        elif event.CmdDown() and keycode == 79:
             self.OnMenuOpen(None)
         
         # Ctrl+s - Save
-        if event.CmdDown() and keycode == 83:
+        elif event.CmdDown() and keycode == 83:
             self.OnMenuSave(None)
         
         # Ctrl+q - Quit
-        if event.CmdDown() and keycode == 81:
+        elif event.CmdDown() and keycode == 81:
             self.OnMenuExit(None)
         
         # Ctrl+z - Undo
@@ -745,19 +760,24 @@ class regionEditor(wx.Frame):
         # Ctrl+y - Redo
         elif event.CmdDown() and keycode == 89:
             self.OnMenuRedo(None)
-
+        
+        # Ctrl+a - Select All
+        elif event.CmdDown() and keycode == 65:
+            self.selectedRegions = range(len(self.regions))
+            self.RedrawCanvas()
+        
         # Pass event on so other key combinations still work
         else:
             event.Skip()
-
+    
     def OnEnterWindow(self, event):
         """Set the focus to the canvas to enable zooming."""
         self.canvas.SetFocus()
-
+    
     def OnLeaveWindow(self, event):
         """Unset the focus from the canvas to disable zooming."""
         self.SetFocus()
-
+    
     def OnCanvasPaint(self, event):
         """Redraw the contents of the canvas panel."""
         # Set up to draw
@@ -935,57 +955,8 @@ class regionEditor(wx.Frame):
         self.AddToUndo(Action(None, region))
         # TODO: Change Undo setup so that adjacency matrix can be added with
         #       regions in one undo step
-
-        # Look for adjacent edges to other regions
-        # First add vertices in walls where another region vertex is
-        # Check new region against other regions
-        for iPt, (iReg, iRPoint, iREdge) in enumerate(self.polySnaps):
-            # Point snapped to the edge of another region
-            if iREdge != -1:
-                # Add point to other region and update old transitions
-                self.AddPointToRegion(self.polyVerts[iPt], iReg, iREdge)
-                # Track which point it is connected to
-                self.polySnaps[iPt] = (iReg, iREdge + 1, -1)
-        # Check other regions against new region
-        for iReg, otherReg in enumerate(self.regions):
-            for iPt, pt in enumerate(otherReg.verts):
-                pt, iRPoint, iREdge, snapped = \
-                    self.Snap1Region(region, pt, False)
-                # Other region vertex snapped to wall of new region
-                if iREdge != -1:
-                    # Add point to new region and update old transitions
-                    self.AddPointToRegion(pt, idxNewReg, iREdge)
-                    # Track which point it is connected to
-                    self.polySnaps.insert(iREdge + 1, (iReg, iPt, -1))
         
-        # Next look for adjacent edges and update transition matrix accordingly
-        for iSide in range(len(self.polySnaps)):
-            iReg1, iRPoint1, iREdge1 = self.polySnaps[iSide]
-            if iSide < len(self.polySnaps) - 1:
-                iReg2, iRPoint2, iREdge2 = self.polySnaps[iSide + 1]
-            else:
-                iReg2, iRPoint2, iREdge2 = self.polySnaps[0]
-            # Same region and adjacent points
-            if iReg1 != -1 and iReg1 == iReg2:
-                # TODO: Could be same point that is already shared by two or
-                #       more regions. Need to check for this.
-                # Not last side in other region
-                if abs(iRPoint1 - iRPoint2) == 1:
-                    iOtherRegSide = min(iRPoint1, iRPoint2)
-                    self.adjacent[idxNewReg][iReg1].\
-                        append((iSide, iOtherRegSide))
-                    self.adjacent[iReg1][idxNewReg].\
-                        append((iOtherRegSide, iSide))
-                # Last side in other region
-                elif (iRPoint1 == 0 and iRPoint2 == \
-                        len(self.regions[iReg2].verts) - 1) or \
-                        (iRPoint2 == 0 and iRPoint1 == \
-                        len(self.regions[iReg1].verts) - 1):
-                    iOtherRegSide = len(self.regions[iReg1].verts) - 1
-                    self.adjacent[idxNewReg][iReg1].\
-                        append((iSide, iOtherRegSide))
-                    self.adjacent[iReg1][idxNewReg].\
-                        append((iOtherRegSide, iSide))
+        self.RecalcAdjacency(idxNewReg)
         
         # Cleanup and draw
         self.polyVerts = []
@@ -993,11 +964,30 @@ class regionEditor(wx.Frame):
         self.polyAdjEdges = []
         self.DrawRegion(region)
         self.DrawAdjacencies(idxNewReg)
+    
+    def DeleteRegion(self, iReg):
+        """Removes region from regions list and adjacency list.
+        
+        iReg - Index of region to remove
+        """
+        # Remove region from tracking lists
+        self.regions.pop(iReg)
+        self.adjacent.pop(iReg)
+        for jReg in range(len(self.regions)):
+            self.adjacent[jReg].pop(iReg)
+        
+        # Redraw regions
+        self.RedrawCanvas()
+        
+        # TODO: Add to undo
 
     def AddPointToRegion(self, pt, iReg, iEdge):
         """Add a vertex to the region.
         
         pt - Point object, location of new vertex in map coordinates
+             Unless this is a new Point object, it is recommended that this be
+             a copy of the previous Point object
+             AddPointToRegion(copy.copy(pt), iReg, iEdge)
         iRegion - Int, index of region to modify
         iEdge - Int, index of the edge to replace with edges to and from pt
         """
@@ -1070,7 +1060,97 @@ class regionEditor(wx.Frame):
         self.RedrawCanvas()
         # TODO: Add to undo
     
-    #def RecalcAdjacency(self, 
+    def RecalcAdjacency(self, iReg, iRegStart=0):
+        """Recalculate the adjacent walls between the specified region and
+        other regions. If walls or points are "close enough" to being colinear
+        or colocated, they will be moved so that they overlap. The saved
+        adjacency matrix will be updated accordingly.
+        
+        Can specify which region to start checking with so that the input
+        region will not check against all regions. This is useful if entire map
+        needs to be rechecked, it can be done so with:
+        
+            for iReg, reg in enumerate(self.regions):
+                self.RecalcAdjacency(iReg, iRegStart=iReg)
+        
+        This will avoid redundant checking of regions. Note that the function
+        will avoid checking against itself, so there is no reason to avoid
+        calling it on itself.
+        
+        iReg - Index of region of interest
+        iRegStart - Specifies to check reg against self.regions[iRegStart:]
+        """
+        # Reset adjacency related to this region
+        for iOthReg in range(len(self.regions)):
+            self.adjacent[iReg][iOthReg] = []
+            self.adjacent[iOthReg][iReg] = []
+        
+        # Pull region for easy access
+        reg = self.regions[iReg]
+        
+        # Keeps track of the colocation of vertices of this region with points
+        # of other regions
+        # List of lists of tuples
+        # Outer list - len(vertColloc) == len(reg.verts)
+        # Inner list - Contains collocation information for each region vertex
+        # Tuple - Contains collocation information from vertex on this region
+        #         to vertex on another region in the format:
+        #         (iReg, iPt)
+        vertsColloc = [[] for iPt in xrange(len(reg.verts))]
+        
+        # Check all other regions against this region
+        for iOthReg in range(len(self.regions[iRegStart:])):
+            # No need to check against self
+            if iOthReg == iReg:
+                continue
+            
+            for iOthPt, othPt in enumerate(self.regions[iOthReg].verts):
+                pt, iPt, iEd, snapped = self.Snap1Region(reg, othPt)
+                # Other region vertex snapped to wall of new region
+                if iEd != -1:
+                    # Add point to new region and update old transitions
+                    self.AddPointToRegion(copy.copy(pt), iReg, iEd)
+                    vertsColloc.append([])
+                    # Don't bother tracking point connectivity here
+                    # Recheck it in next loop so we can look at all regions
+        
+        # Check this region against others and create new vertices as necessary
+        for iPt, pt in enumerate(reg.verts):
+            snapResults = self.SnapRegions(pt, checkAll=True)
+            # Process the "nearness" information
+            for othPt, iOthReg, iOthPt, iOthEd in snapResults:
+                # Ignore same region
+                if iOthReg == iReg:
+                    continue
+                
+                # Change region point location
+                pt.Set(othPt.x, othPt.y)
+                
+                # Snapped to a point in the other region
+                if iOthPt != -1:
+                    vertsColloc[iPt].append((iOthReg, iOthPt))
+                # Snapped to an edge of the other region
+                elif iOthEd != -1:
+                    self.AddPointToRegion(copy.copy(pt), iOthReg, iOthEd)
+                    vertsColloc[iPt].append((iOthReg, iOthEd + 1))
+        
+        # Now look for adjacent edges and update transition matrix accordingly
+        for iPt in range(len(reg.verts)):       # Start point of edge
+            jPt = (iPt + 1) % len(reg.verts)    # End point of edge
+            for iOthReg, iOthPt in vertsColloc[iPt]:
+                jOthPt1 = (iOthPt - 1) % len(self.regions[iOthReg].verts)
+                jOthPt2 = (iOthPt + 1) % len(self.regions[iOthReg].verts)
+                # Check edge on other region prior to point
+                if (iOthReg, jOthPt1) in vertsColloc[jPt]:
+                    # Indicate transition from this region to other region
+                    # from current this region side to other region side
+                    # and reverse transition as well
+                    self.adjacent[iReg][iOthReg].append((iPt, jOthPt1))
+                    self.adjacent[iOthReg][iReg].append((jOthPt1, iPt))
+                # Check edge on other region after point
+                elif (iOthReg, jOthPt2) in vertsColloc[jPt]:
+                    self.adjacent[iReg][iOthReg].append((iPt, iOthPt))
+                    self.adjacent[iOthReg][iReg].append((iOthPt, iPt))
     
     def Autoboundary(self):
         """Automatically create region representing the boundary of the map."""
@@ -1125,12 +1205,12 @@ class regionEditor(wx.Frame):
         # (since Vicon points may be moving around)
         snapped = False
         pt, idxRegion, idxRPoint, idxREdge, snapped = \
-            self.SnapRegions(pt, snapped)
+            self.SnapRegions(pt, snapped=snapped)
 
         # Check points in current region creation
         # Only snap to vertices
         # Don't count this for iRegion or iRPoint
-        pt, idxPolyPoint, snapped = self.SnapPoly(pt, snapped)
+        pt, idxPolyPoint, snapped = self.SnapPoly(pt, snapped=snapped)
 
         # Check all Vicon points
         pt, idxMarker, snapped = self.SnapVicon(pt, snapped)
@@ -1138,39 +1218,59 @@ class regionEditor(wx.Frame):
         # Only return region indices, since they are usually all that matter
         return pt, idxRegion, idxRPoint, idxREdge
 
-    def SnapRegions(self, pt, snapped):
+    def SnapRegions(self, pt, checkAll=False, snapped=False):
         """Snap the point to any sufficiently "nearby" region vertex or wall.
 
         pt - Point object, map coordinates of point
-        snapped - Boolean, true is point has snapped already, false if not
+        checkAll - Boolean, true if this function should check the point
+                   against all regions, even if it has already snapped to one
+        snapped - Boolean, true if point has snapped already, false if not
                   If point is already snapped, this function will just return
-        returns - (snappedPt, idxRegion, idxRPoint, idxREdge, snapped)
-            snappedPt - Point object, point after snapping
-            idxRegion - int, index of region if snapped to region point/edge
-                        if not snapped to region it will be -1
-            idxRPoint - int, index of point in region.verts if snapped to point
-                        if not snapped to point it will be -1
-            idxREdge - int, index of side in region if snapped to edge
-                       edge j is defined by region.verts[j:j+1]
-                       if not snapped to edge it will be -1
-            snapped - Boolean, true if point has been snapped, false if not
-                      Note that if input snapped is true, output will be true
-                      even if the point did not snap to a region point or edge
+        returns -
+            If checkAll is true, then the return will be a list containing
+            tuples in the format (snappedPt, idxRegion, idxRPoint, idxREdge),
+            where each entry is as described below. If there is no snapping
+            then the list will be empty.
+            If checkAll is false, then a single tuple will be returned:
+            (snappedPt, idxRegion, idxRPoint, idxREdge, snapped)
+                snappedPt - Point object, point after snapping
+                idxRegion - int, index of region if snapped to region point/edge
+                            if not snapped to region it will be -1
+                idxRPoint - int, index of point in region.verts if snapped to point
+                            if not snapped to point it will be -1
+                idxREdge - int, index of side in region if snapped to edge
+                           edge j is defined by region.verts[j:j+1]
+                           if not snapped to edge it will be -1
+                snapped - Boolean, true if point has been snapped, false if not
+                          Note that if input snapped is true, output will be true
+                          even if the point did not snap to a region point or edge
         """
-        idxRegion = -1
-        idxRPoint = -1
-        idxREdge = -1
-        i = 0       # Region incrementer
-        while (not snapped) and i < len(self.regions):
+        # Initialize output
+        if not checkAll:
+            idxRegion = -1
+            idxRPoint = -1
+            idxREdge = -1
+        else:
+            output = []
+        
+        # Check through regions
+        i = len(self.regions) - 1   # Region decrementer
+        while (checkAll or not snapped) and i >= 0:
             pt, idxRPoint, idxREdge, snapped = \
-                self.Snap1Region(self.regions[i], pt, snapped)
-            if snapped:
+                self.Snap1Region(self.regions[i], pt, \
+                snapped=(not checkAll and snapped))
+            if idxRPoint != -1 or idxREdge != -1:
                 idxRegion = i
-            i += 1
-
-        return pt, idxRegion, idxRPoint, idxREdge, snapped
+                if checkAll:
+                    output.append((pt, idxRegion, idxRPoint, idxREdge))
+            i -= 1
+        
+        if not checkAll:
+            return pt, idxRegion, idxRPoint, idxREdge, snapped
+        else:
+            return output
     
-    def Snap1Region(self, region, pt, snapped):
+    def Snap1Region(self, region, pt, snapped=False):
         """Snap the point to any sufficiently "nearby" region vertex or wall
         in the specified region.
         
@@ -1236,7 +1336,7 @@ class regionEditor(wx.Frame):
         
         return pt, idxRPoint, idxREdge, snapped
     
-    def SnapPoly(self, pt, snapped):
+    def SnapPoly(self, pt, snapped=False):
         """Snap the point to any vertex in the currently being created region
         if it is sufficiently "nearby".
 
@@ -1650,6 +1750,11 @@ class Point:
     def __truediv__(self, other):
         """True division operator."""
         return self.__div__(other)
+    
+    def Set(self, x, y):
+        """Change the value of the point."""
+        self.x = x
+        self.y = y
 
     def Dot(self, other):
         """Dot product."""
