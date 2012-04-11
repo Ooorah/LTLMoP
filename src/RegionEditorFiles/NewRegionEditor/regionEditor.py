@@ -922,7 +922,7 @@ class regionEditor(wx.Frame):
         """
         # Create region
         rName = 'r' + str(len(self.regions))
-        region = Region(self.polyVerts, rName)  # TODO: Add color to regions
+        region = Region(self.polyVerts, rName)
         self.regions.append(region)
         idxNewReg = len(self.regions) - 1
         # Add row and column to list of lists of lists representing adjacency
@@ -1066,6 +1066,8 @@ class regionEditor(wx.Frame):
         # Redraw the regions to ensure correct name/color
         self.RedrawCanvas()
         # TODO: Add to undo
+    
+    #def RecalcAdjacency(self, 
     
     def Autoboundary(self):
         """Automatically create region representing the boundary of the map."""
