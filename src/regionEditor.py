@@ -13,8 +13,10 @@ import socket
 import struct
 import copy
 import random
+import re
 import winsound
 import pyttsx
+import lib.fileMethods as fileMethods
 
 # begin wxGlade: extracode
 # end wxGlade
@@ -124,7 +126,7 @@ class regionEditor(wx.Frame):
         # Bind mouse events
         self.canvas.Bind(wx.EVT_LEFT_DOWN, self.OnMouseLeftDown, self.canvas)
         self.canvas.Bind(wx.EVT_LEFT_UP, self.OnMouseLeftUp, self.canvas)
-        #self.canvas.Bind(wx.EVT_LEFT_DCLICK, self.OnMouseLeftDClick, self.canvas)
+        self.canvas.Bind(wx.EVT_LEFT_DCLICK, self.OnMouseLeftDClick, self.canvas)
         self.canvas.Bind(wx.EVT_RIGHT_DOWN, self.OnMouseRightDown, self.canvas)
         self.canvas.Bind(wx.EVT_RIGHT_UP, self.OnMouseRightUp, self.canvas)
         self.canvas.Bind(wx.EVT_MOUSEWHEEL, self.OnMouseWheel, self.canvas)
@@ -148,7 +150,7 @@ class regionEditor(wx.Frame):
         self.canvasScale = Point(xScale, yScale)
         self.canvasOffset = Point(xOffset, yOffset)
         
-        # Set up for region creation
+        # Region-related parameters
         self.regions = []                   # List of regions in the map
         self.adjacent = []                  # List of lists holding transition
                                             # edges between regions.
@@ -159,9 +161,6 @@ class regionEditor(wx.Frame):
                                             # list of the same length, but edge
                                             # indices are for region j.
                                             # adjacent[i][i] will be empty.
-        self.leftClickPt = Point(0.0, 0.0)  # Location of last left downclick
-        self.rightClickPt = Point(0.0, 0.0) # Location of last right downclick
-        self.tolerance = 5.0 * xScale       # Distance to consider as "same point" (m)
         self.polyVerts = []                 # Keeps points for region creation
                                             # and dimensioning
                                             # Region creation: [Point(x0,y0), ...]
@@ -171,6 +170,13 @@ class regionEditor(wx.Frame):
                                             # [(idxReg, idxPt, idxEdge), ...]
         self.boundary = None                # Region representing the map bound
         # TODO: When changing the name of a region, check if it is called boundary
+        
+        # Mouse-related parameters
+        self.leftClickPt = Point(0.0, 0.0)  # Location of last left downclick
+        self.rightClickPt = Point(0.0, 0.0) # Location of last right downclick
+        self.justDoubleClicked = False      # Indicating double-click event
+        self.tolerance = 5.0 * xScale       # Distance to consider as "same point" (m)
+        self.selectedRegions = []           # List of currently selected regions
         
         # Set up for undo/redo capabilities
         # TODO: Disable self.menuUndo and self.menuRedo
@@ -291,8 +297,86 @@ class regionEditor(wx.Frame):
         event.Skip()
     
     def OnMenuOpen(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuOpen' not implemented"
-        event.Skip()
+        # Start up save dialog
+        dialogOpen = wx.FileDialog(self, message="Open File", \
+            defaultDir=sys.path[0], \
+            defaultFile=self.fileName.split('\\').pop(), \
+            wildcard="*.regions", style=wx.FD_OPEN)
+        
+        # Hit Open
+        if dialogOpen.ShowModal() == wx.ID_OK:
+            filePath = dialogOpen.GetPath()
+            if not os.path.exists(filePath) or not ('.regions' in filePath):
+                return
+            
+            # Pull all data from file into dictionary for parsing
+            data = fileMethods.readFromFile(filePath)
+            
+            if data is None:
+                return
+            
+            # Clear all current information
+            self.regions = []
+            self.adjacent = []
+            # self.bkgndImage = None
+            
+            # TODO: Uncomment when background image is included
+            #try:
+            #    self.bkgndImage = data["Background"][0]
+            #except KeyError:
+            #    self.bkgndImage = None
+            
+            # Set all region information from lines in file
+            # Each region line format is this:
+            #   Name {ColorR ColorG ColorB} [(x1 y1) (x2 y2) ...]
+            for rData in data["Regions"]:
+                rData = re.sub('[\[\]\(\)\{\}]', '', rData)
+                rData = rData.split()       # Separates on any whitespace
+                rName = rData[0]
+                rRGB = []
+                for i in range(1, 4):       # Convert colors to integers
+                    rRGB.append(int(rData[i]))
+                rVerts = []
+                for i in range(4, len(rData), 2):
+                    x = float(rData[i])
+                    y = float(rData[i+1])
+                    rVerts.append(Point(x, y))
+                region = Region(rVerts, rName, rgb=rRGB)
+                self.regions.append(region)
+
+            # Make an empty adjacency matrix of size (nRegions) x (nRegions)
+            self.adjacent = [[[] for j in range(len(self.regions))] \
+                for i in range(len(self.regions))]
+            
+            # Assign region transitions
+            # Each transition line format is this:
+            # Region1Idx Region2Idx [(Reg1FaceIdx1 Reg2FaceIdx1) (Reg1FaceIdx2 Reg2FaceIdx2) ...]
+            for tData in data["Transitions"]:
+                tData = re.sub('[\[\]\(\)]', '', tData)
+                tData = tData.split();      # Separate on any whitespace
+                iReg1 = int(tData[0])
+                iReg2 = int(tData[1])
+                faces = []
+                # All transitions between regions
+                for i in range(2, len(transData), 2):
+                    iFaceReg1 = int(tData[i])
+                    iFaceReg2 = int(tData[i+1])
+                    self.adjacent[iReg1][iReg2].append((iFaceReg1, iFaceReg2))
+                    # Note that region file specifies transitions in both directions
+                    # So mirroring here is unnecessary
+                    
+            # Set "obstacleness" of regions
+            if "Obstacles" in data:
+                for iReg in data["Obstacles"]:
+                    self.regions[iReg].isObstacle = True
+            
+            # Store the filename for saving
+            self.fileName = filePath
+        
+        # TODO: Rescale/pan map to bring full map into view
+        self.RedrawCanvas()
+        
+        dialogOpen.Destroy()
     
     def OnMenuSave(self, event):  # wxGlade: regionEditor.<event_handler>
         """Save to file that has already been used."""
@@ -301,8 +385,8 @@ class regionEditor(wx.Frame):
             f.write("# This is a region definition file for the LTLMoP " + \
                 "toolkit.\n# Format details are described at the " + \
                 "beginning of each section below.\n# Note that all values " + \
-                "are separated by *tabs*.\n\nBackground: # Relative path " + \
-                "of background image file\n")
+                "are separated by *whitespace*.\n\nBackground: # Relative " + \
+                "path of background image file\n")
             f.write("None\n\n")     # TODO: Support for background images
             f.write("Obstacles: # Indices of regions to treat as obstacles\n")
             f.write("\n\n")         # TODO: Support for obstacles
@@ -315,9 +399,6 @@ class regionEditor(wx.Frame):
             for reg in self.regions:
                 f.write(str(reg) + "\n")
             f.write("\n")
-            f.write("Thumbnail: # Relative path of image file that has " + \
-                "region shapes overlayed on background image\n")
-            f.write("None\n\n")         # TODO: Save png thumbnail
             f.write("Transitions: # Region1Idx Region2Idx " + \
                 "[(Reg1FaceIdx1 Reg2FaceIdx1) (Reg1FaceIdx2 Reg2FaceIdx2) " + \
                 "...]\n")
@@ -486,9 +567,13 @@ class regionEditor(wx.Frame):
         # Get click position
         ptPix = event.GetPosition()
         pt, iReg, iPt, iEd = self.SnapPoint(self.Pix2Map(ptPix))
-
+        
+        # Has been handled by double-click event handler
+        if self.justDoubleClicked:
+            self.justDoubleClicked = False      # Reset flag
+        
         # Creating a rectangular region
-        if self.toggleSquare.GetValue():
+        elif self.toggleSquare.GetValue():
             # Making the second corner of rectangle
             if self.polyVerts:
                 # Snap vertices to regions as necessary, not to Vicon
@@ -496,9 +581,9 @@ class regionEditor(wx.Frame):
                 x0 = self.polyVerts[0].x
                 y0 = self.polyVerts[0].y
                 pt1, iReg1, iPt1, iEd1, snapped1 = \
-                    self.SnapRegions(Point(x0, pt.y), False)
+                    self.SnapRegions(Point(x0, pt.y))
                 pt3, iReg3, iPt3, iEd3, snapped3 = \
-                    self.SnapRegions(Point(pt.x, y0), False)
+                    self.SnapRegions(Point(pt.x, y0))
                 # Move clicked points if other vertices snap and they don't
                 if snapped1:
                     if iReg == -1:
@@ -589,7 +674,33 @@ class regionEditor(wx.Frame):
                     self.AddToUndo(Action(oldRegion, self.regions[iReg]))
                     self.polyVerts = []
                     self.RedrawCanvas()
-
+        
+        # Dragging region(s) or vertices
+        elif self.selectedRegions and \
+                pt.Dist(self.leftClickPt) > self.tolerance:
+            self.leftClickPt, iReg, iPt, iEd, snapped = \
+                self.SnapRegions(self.leftClickPt)
+            iRegInner = self.InsideRegions(self.leftClickPt)
+            
+            # Dragging point(s)
+            if iReg in self.selectedRegions and iPt != -1:
+                # Change point position and check adjacencies
+                self.regions[iReg].verts[iPt].Set(pt.x, pt.y)
+                self.RecalcAdjacency(iReg)
+                self.RedrawCanvas()
+            
+            # Dragging region(s)
+            elif iReg in self.selectedRegions or \
+                    iRegInner in self.selectedRegions:
+                # Change region(s) position and check adjacencies
+                delta = pt - self.leftClickPt
+                for iRegSel in self.selectedRegions:
+                    for iPt in range(len(self.regions[iRegSel].verts)):
+                        self.regions[iRegSel].verts[iPt] += delta
+                for iRegSel in self.selectedRegions:
+                    self.RecalcAdjacency(iRegSel)
+                self.RedrawCanvas()
+        
         # Panning the map view
         elif pt.Dist(self.leftClickPt) > self.tolerance:
             downClickPix = self.Map2Pix(self.leftClickPt)
@@ -598,15 +709,58 @@ class regionEditor(wx.Frame):
                 self.canvasScale.y * (downClickPix[1] - ptPix[1]) + \
                 self.canvasOffset.y)
             self.RedrawCanvas()
+        
+        # Check if selecting or deselecting a region
+        else:
+            if iReg != -1:
+                iRegInner = iReg
+            else:
+                iRegInner = self.InsideRegions(pt)
+            
+            # Do something about that region selection
+            if iRegInner != -1:
+                # Selecting single region
+                if not event.CmdDown():
+                    self.selectedRegions = []
+                    self.selectedRegions.append(iRegInner)
+                
+                # Deselecting a region
+                elif iRegInner in self.selectedRegions:
+                    self.selectedRegions.remove(iRegInner)
+                
+                # Adding a region to the selection
+                else:
+                    self.selectedRegions.append(iRegInner)
+            
+            # Clear all region selections
+            else:
+                self.selectedRegions = []
+            self.RedrawCanvas()
     
-    # TODO: May need to handle all mouse events in one huge window
-    #       to avoid having the double click interfere with regular clicking
-    #def OnMouseLeftDClick(self, event):
-    #    """Perform action based on current mode of operation."""
-    #    # Creating a polygonal region
-    #    if self.togglePoly.GetValue() and self.polyVerts and \
-    #            len(self.polyVerts) > 2:
-    #        self.CreateRegion()
+    def OnMouseLeftDClick(self, event):
+        """Perform action based on current mode of operation."""
+        
+        # Set double-click flag so that next mouse-up is ignored
+        self.justDoubleClicked = True
+        
+        # Creating a polygonal region
+        if self.togglePoly.GetValue() and self.polyVerts and \
+                len(self.polyVerts) > 2:
+            self.CreateRegion()
+        
+        # Editing a region
+        if self.selectedRegions and not self.toggleSquare.GetValue() and \
+                not self.togglePoly.GetValue() and \
+                not self.toggleDim.GetValue():
+            # Unset double-click flag since event does not propagate here
+            self.justDoubleClicked = False
+            
+            # Edit the latest selected region
+            iReg = self.selectedRegions.pop()
+            self.selectedRegions = []
+            self.selectedRegions.append(iReg)
+            self.EditRegion(self.regions[iReg])
+            
     
     def OnMouseRightDown(self, event):
         """Save the right click point so it can be used later."""
@@ -633,12 +787,20 @@ class regionEditor(wx.Frame):
             self.canvasScale.y * (1 - scaler) + self.canvasOffset.y)
         self.canvasScale = self.canvasScale * scaler
         self.RedrawCanvas()
-
+    
     def OnKeyDown(self, event):
         keycode = event.GetKeyCode()
         
-        # Backspace/Delete - Removes last set point during region creation
+        # Backspace/Delete - Deletes selected regions
         if (keycode == wx.WXK_BACK or keycode == wx.WXK_DELETE) and \
+                self.selectedRegions and not self.togglePoly.GetValue() and \
+                not self.toggleSquare.GetValue():
+            self.selectedRegions.sort()
+            while self.selectedRegions:
+                self.DeleteRegion(self.selectedRegions.pop())
+        
+        # Backspace/Delete - Removes last set point during region creation
+        elif (keycode == wx.WXK_BACK or keycode == wx.WXK_DELETE) and \
                 self.polyVerts:
             if self.toggleSquare.GetValue() or self.togglePoly.GetValue():
                 self.polyVerts.pop()
@@ -653,19 +815,19 @@ class regionEditor(wx.Frame):
             self.ResetMapToggles()
         
         # Ctrl+n - New
-        if event.CmdDown() and keycode == 78:
+        elif event.CmdDown() and keycode == 78:
             self.OnMenuNew(None)
         
         # Ctrl+o - Open
-        if event.CmdDown() and keycode == 79:
+        elif event.CmdDown() and keycode == 79:
             self.OnMenuOpen(None)
         
         # Ctrl+s - Save
-        if event.CmdDown() and keycode == 83:
+        elif event.CmdDown() and keycode == 83:
             self.OnMenuSave(None)
         
         # Ctrl+q - Quit
-        if event.CmdDown() and keycode == 81:
+        elif event.CmdDown() and keycode == 81:
             self.OnMenuExit(None)
         
         # Ctrl+z - Undo
@@ -675,42 +837,49 @@ class regionEditor(wx.Frame):
         # Ctrl+y - Redo
         elif event.CmdDown() and keycode == 89:
             self.OnMenuRedo(None)
-
+        
+        # Ctrl+a - Select All
+        elif event.CmdDown() and keycode == 65:
+            self.selectedRegions = range(len(self.regions))
+            self.RedrawCanvas()
+        
         # Pass event on so other key combinations still work
         else:
             event.Skip()
-
+    
     def OnEnterWindow(self, event):
         """Set the focus to the canvas to enable zooming."""
         self.canvas.SetFocus()
-
+    
     def OnLeaveWindow(self, event):
         """Unset the focus from the canvas to disable zooming."""
         self.SetFocus()
-
+    
     def OnCanvasPaint(self, event):
         """Redraw the contents of the canvas panel."""
         # Set up to draw
         dc = wx.PaintDC(self.canvas)
         self.RedrawCanvas(dc)
-
+    
     def RedrawCanvas(self, dc=None):
         """Redraw the contents of the canvas panel.
         Callable from outside or inside EVT_PAINT handler.
-
+        
         dc - Device context object for drawing to canvas.
         """
         # Clear canvas
         self.canvas.ClearBackground()
-
-        # Create device context if calling from outside EVT_PAINT handler
+        
+        # Create device context if not created
         if not dc:
             dc = wx.WindowDC(self.canvas)
-
-        # Redraw all markers
+        
+        # Draw grid background
         self.DrawGrid(dc)
+        
+        # Redraw all markers
         self.DrawMarkers(self.markerPoses, dc)
-
+        
         # Redraw all regions
         for region in self.regions:
             self.DrawRegion(region, dc)
@@ -719,20 +888,24 @@ class regionEditor(wx.Frame):
         # Lower triangular matrix only
         for iReg in range(1, len(self.adjacent)):
             self.DrawAdjacencies(iReg, dc)
-
+        
+        # Redraw selection handles
+        for iReg in self.selectedRegions:
+            self.DrawSelectionHandle(iReg, dc)
+        
         # Redraw partial region
         if self.toggleSquare.GetValue() or self.togglePoly.GetValue():
             for iVert in range(len(self.polyVerts) - 1):
                 ptPix1 = self.Map2Pix(self.polyVerts[iVert])
                 ptPix2 = self.Map2Pix(self.polyVerts[iVert + 1])
                 dc.DrawLine(ptPix1[0], ptPix1[1], ptPix2[0], ptPix2[1])
-
+    
     def DrawGrid(self, dc=None):
         """Draw the axes and grid on the map canvas.
 
         dc - Device context used for drawing on the canvas panel.
         """
-        # Create device context if calling from outside EVT_PAINT handler
+        # Create device context if not created
         if not dc:
             dc = wx.WindowDC(self.canvas)
 
@@ -750,10 +923,11 @@ class regionEditor(wx.Frame):
     def DrawMarkers(self, poses, dc=None):
         """Draw markers at specified global positions.
 
-        poses - List of tuples containing positions of markers in meters [(x, y), ...]
+        poses - List of tuples containing positions of markers in meters
+                [(x, y), ...]
         dc - Device context used for drawing on the canvas panel.
         """
-        # Create device context if calling from outside EVT_PAINT handler
+        # Create device context if not created
         if not dc:
             dc = wx.WindowDC(self.canvas)
 
@@ -761,6 +935,20 @@ class regionEditor(wx.Frame):
         for pose in poses:
             posePix = self.Map2Pix(pose)
             dc.DrawCircle(posePix[0], posePix[1], 5)
+    
+    def DrawSelectionHandle(self, iReg, dc=None):
+        """Draw markers indicating region(s) that have been selected by mouse.
+        
+        iReg - Index of region selected
+        dc - Device context used for drawing on the canvas panel
+        """
+        # Create device context if not created
+        if not dc:
+            dc = wx.WindowDC(self.canvas)
+        
+        for pt in self.regions[iReg].verts:
+            ptPix = self.Map2Pix(pt)
+            dc.DrawCircle(ptPix[0], ptPix[1], 5)
 
     def DrawRegion(self, region, dc=None):
         """Draw a single region.
@@ -768,7 +956,7 @@ class regionEditor(wx.Frame):
         region - Instance of Region class, contains information about the region.
         dc - Device context used for drawing on the canvas panel.
         """
-        # Create device context if calling from outside EVT_PAINT handler
+        # Create device context if not created
         if not dc:
             dc = wx.WindowDC(self.canvas)
 
@@ -785,7 +973,7 @@ class regionEditor(wx.Frame):
         iReg - Int, index of region of interest in self.regions.
         dc - Device context used for drawing on the canvas panel.
         """
-        # Create device context if calling from outside other drawing methods
+        # Create device context if not created
         if not dc:
             dc = wx.WindowDC(self.canvas)
         oldPen = dc.GetPen()
@@ -834,7 +1022,7 @@ class regionEditor(wx.Frame):
         """
         # Create region
         rName = 'r' + str(len(self.regions))
-        region = Region(self.polyVerts, rName)  # TODO: Add color to regions
+        region = Region(self.polyVerts, rName)
         self.regions.append(region)
         idxNewReg = len(self.regions) - 1
         # Add row and column to list of lists of lists representing adjacency
@@ -844,57 +1032,8 @@ class regionEditor(wx.Frame):
         self.AddToUndo(Action(None, region))
         # TODO: Change Undo setup so that adjacency matrix can be added with
         #       regions in one undo step
-
-        # Look for adjacent edges to other regions
-        # First add vertices in walls where another region vertex is
-        # Check new region against other regions
-        for iPt, (iReg, iRPoint, iREdge) in enumerate(self.polySnaps):
-            # Point snapped to the edge of another region
-            if iREdge != -1:
-                # Add point to other region and update old transitions
-                self.AddPointToRegion(self.polyVerts[iPt], iReg, iREdge)
-                # Track which point it is connected to
-                self.polySnaps[iPt] = (iReg, iREdge + 1, -1)
-        # Check other regions against new region
-        for iReg, otherReg in enumerate(self.regions):
-            for iPt, pt in enumerate(otherReg.verts):
-                pt, iRPoint, iREdge, snapped = \
-                    self.Snap1Region(region, pt, False)
-                # Other region vertex snapped to wall of new region
-                if iREdge != -1:
-                    # Add point to new region and update old transitions
-                    self.AddPointToRegion(pt, idxNewReg, iREdge)
-                    # Track which point it is connected to
-                    self.polySnaps.insert(iREdge + 1, (iReg, iPt, -1))
         
-        # Next look for adjacent edges and update transition matrix accordingly
-        for iSide in range(len(self.polySnaps)):
-            iReg1, iRPoint1, iREdge1 = self.polySnaps[iSide]
-            if iSide < len(self.polySnaps) - 1:
-                iReg2, iRPoint2, iREdge2 = self.polySnaps[iSide + 1]
-            else:
-                iReg2, iRPoint2, iREdge2 = self.polySnaps[0]
-            # Same region and adjacent points
-            if iReg1 != -1 and iReg1 == iReg2:
-                # TODO: Could be same point that is already shared by two or
-                #       more regions. Need to check for this.
-                # Not last side in other region
-                if abs(iRPoint1 - iRPoint2) == 1:
-                    iOtherRegSide = min(iRPoint1, iRPoint2)
-                    self.adjacent[idxNewReg][iReg1].\
-                        append((iSide, iOtherRegSide))
-                    self.adjacent[iReg1][idxNewReg].\
-                        append((iOtherRegSide, iSide))
-                # Last side in other region
-                elif (iRPoint1 == 0 and iRPoint2 == \
-                        len(self.regions[iReg2].verts) - 1) or \
-                        (iRPoint2 == 0 and iRPoint1 == \
-                        len(self.regions[iReg1].verts) - 1):
-                    iOtherRegSide = len(self.regions[iReg1].verts) - 1
-                    self.adjacent[idxNewReg][iReg1].\
-                        append((iSide, iOtherRegSide))
-                    self.adjacent[iReg1][idxNewReg].\
-                        append((iOtherRegSide, iSide))
+        self.RecalcAdjacency(idxNewReg)
         
         # Cleanup and draw
         self.polyVerts = []
@@ -902,11 +1041,30 @@ class regionEditor(wx.Frame):
         self.polyAdjEdges = []
         self.DrawRegion(region)
         self.DrawAdjacencies(idxNewReg)
+    
+    def DeleteRegion(self, iReg):
+        """Removes region from regions list and adjacency list.
+        
+        iReg - Index of region to remove
+        """
+        # Remove region from tracking lists
+        self.regions.pop(iReg)
+        self.adjacent.pop(iReg)
+        for jReg in range(len(self.regions)):
+            self.adjacent[jReg].pop(iReg)
+        
+        # Redraw regions
+        self.RedrawCanvas()
+        
+        # TODO: Add to undo
 
     def AddPointToRegion(self, pt, iReg, iEdge):
         """Add a vertex to the region.
         
         pt - Point object, location of new vertex in map coordinates
+             Unless this is a new Point object, it is recommended that this be
+             a copy of the previous Point object
+             AddPointToRegion(copy.copy(pt), iReg, iEdge)
         iRegion - Int, index of region to modify
         iEdge - Int, index of the edge to replace with edges to and from pt
         """
@@ -937,6 +1095,139 @@ class regionEditor(wx.Frame):
                 elif thisRegFace == iEdge:
                     self.adjacent[jReg][iReg].\
                         append((otherRegFace, thisRegFace + 1))
+    
+    def EditRegion(self, reg):
+        """Show the edit region dialog.
+        Allow user to change name, color, and obstacleness of a region.
+        
+        reg - Region to edit
+        """
+        # Create dialog
+        regEdDia = RegionEditDialog(self, wx.ID_ANY, "Edit Region Information")
+        
+        # Set appropriate control values
+        regEdDia.textName.SetValue(reg.name)
+        regEdDia.colorPicker.SetColour(reg.color)
+        regEdDia.chkbxObst.SetValue(reg.isObstacle)
+        
+        # Wait for user to close the dialog
+        done = False
+        while not done:
+            answer = regEdDia.ShowModal()
+            # User canceled
+            if answer == wx.ID_CANCEL:
+                regEdDia.Destroy()
+                done = True
+            # Same name or unique new name
+            elif regEdDia.textName.GetValue() == reg.name or \
+                    regEdDia.textName.GetValue() not in \
+                    [r.name for r in self.regions]:
+                reg.name = regEdDia.textName.GetValue()
+                reg.color = regEdDia.colorPicker.GetColour()
+                reg.isObstacle = regEdDia.chkbxObst.GetValue()
+                regEdDia.Destroy()
+                done = True
+            # Non-unique name - needs to re-edit
+            else:
+                wx.MessageBox("Region with name \"%s\" already exists." % \
+                    (regEdDia.textName.GetValue()), "Error", \
+                    style = wx.OK | wx.ICON_ERROR)
+        
+        # Redraw the regions to ensure correct name/color
+        self.RedrawCanvas()
+        # TODO: Add to undo
+    
+    def RecalcAdjacency(self, iReg, iRegStart=0):
+        """Recalculate the adjacent walls between the specified region and
+        other regions. If walls or points are "close enough" to being colinear
+        or colocated, they will be moved so that they overlap. The saved
+        adjacency matrix will be updated accordingly.
+        
+        Can specify which region to start checking with so that the input
+        region will not check against all regions. This is useful if entire map
+        needs to be rechecked, it can be done so with:
+        
+            for iReg, reg in enumerate(self.regions):
+                self.RecalcAdjacency(iReg, iRegStart=iReg)
+        
+        This will avoid redundant checking of regions. Note that the function
+        will avoid checking against itself, so there is no reason to avoid
+        calling it on itself.
+        
+        iReg - Index of region of interest
+        iRegStart - Specifies to check reg against self.regions[iRegStart:]
+        """
+        # Reset adjacency related to this region
+        for iOthReg in range(len(self.regions)):
+            self.adjacent[iReg][iOthReg] = []
+            self.adjacent[iOthReg][iReg] = []
+        
+        # Pull region for easy access
+        reg = self.regions[iReg]
+        
+        # Keeps track of the colocation of vertices of this region with points
+        # of other regions
+        # List of lists of tuples
+        # Outer list - len(vertColloc) == len(reg.verts)
+        # Inner list - Contains collocation information for each region vertex
+        # Tuple - Contains collocation information from vertex on this region
+        #         to vertex on another region in the format:
+        #         (iReg, iPt)
+        vertsColloc = [[] for iPt in xrange(len(reg.verts))]
+        
+        # Check all other regions against this region
+        for iOthReg in range(len(self.regions[iRegStart:])):
+            # No need to check against self
+            if iOthReg == iReg:
+                continue
+            
+            for iOthPt, othPt in enumerate(self.regions[iOthReg].verts):
+                pt, iPt, iEd, snapped = self.Snap1Region(reg, othPt)
+                # Other region vertex snapped to wall of new region
+                if iEd != -1:
+                    # Add point to new region and update old transitions
+                    self.AddPointToRegion(copy.copy(pt), iReg, iEd)
+                    vertsColloc.append([])
+                    # Don't bother tracking point connectivity here
+                    # Recheck it in next loop so we can look at all regions
+        
+        # Check this region against others and create new vertices as necessary
+        for iPt, pt in enumerate(reg.verts):
+            snapResults = self.SnapRegions(pt, checkAll=True)
+            # Process the "nearness" information
+            for othPt, iOthReg, iOthPt, iOthEd in snapResults:
+                # Ignore same region
+                if iOthReg == iReg:
+                    continue
+                
+                # Change region point location
+                pt.Set(othPt.x, othPt.y)
+                
+                # Snapped to a point in the other region
+                if iOthPt != -1:
+                    vertsColloc[iPt].append((iOthReg, iOthPt))
+                # Snapped to an edge of the other region
+                elif iOthEd != -1:
+                    self.AddPointToRegion(copy.copy(pt), iOthReg, iOthEd)
+                    vertsColloc[iPt].append((iOthReg, iOthEd + 1))
+        
+        # Now look for adjacent edges and update transition matrix accordingly
+        for iPt in range(len(reg.verts)):       # Start point of edge
+            jPt = (iPt + 1) % len(reg.verts)    # End point of edge
+            for iOthReg, iOthPt in vertsColloc[iPt]:
+                jOthPt1 = (iOthPt - 1) % len(self.regions[iOthReg].verts)
+                jOthPt2 = (iOthPt + 1) % len(self.regions[iOthReg].verts)
+                # Check edge on other region prior to point
+                if (iOthReg, jOthPt1) in vertsColloc[jPt]:
+                    # Indicate transition from this region to other region
+                    # from current this region side to other region side
+                    # and reverse transition as well
+                    self.adjacent[iReg][iOthReg].append((iPt, jOthPt1))
+                    self.adjacent[iOthReg][iReg].append((jOthPt1, iPt))
+                # Check edge on other region after point
+                elif (iOthReg, jOthPt2) in vertsColloc[jPt]:
+                    self.adjacent[iReg][iOthReg].append((iPt, iOthPt))
+                    self.adjacent[iOthReg][iReg].append((iOthPt, iPt))
     
     def Autoboundary(self):
         """Automatically create region representing the boundary of the map."""
@@ -991,12 +1282,12 @@ class regionEditor(wx.Frame):
         # (since Vicon points may be moving around)
         snapped = False
         pt, idxRegion, idxRPoint, idxREdge, snapped = \
-            self.SnapRegions(pt, snapped)
+            self.SnapRegions(pt, snapped=snapped)
 
         # Check points in current region creation
         # Only snap to vertices
         # Don't count this for iRegion or iRPoint
-        pt, idxPolyPoint, snapped = self.SnapPoly(pt, snapped)
+        pt, idxPolyPoint, snapped = self.SnapPoly(pt, snapped=snapped)
 
         # Check all Vicon points
         pt, idxMarker, snapped = self.SnapVicon(pt, snapped)
@@ -1004,39 +1295,59 @@ class regionEditor(wx.Frame):
         # Only return region indices, since they are usually all that matter
         return pt, idxRegion, idxRPoint, idxREdge
 
-    def SnapRegions(self, pt, snapped):
+    def SnapRegions(self, pt, checkAll=False, snapped=False):
         """Snap the point to any sufficiently "nearby" region vertex or wall.
 
         pt - Point object, map coordinates of point
-        snapped - Boolean, true is point has snapped already, false if not
+        checkAll - Boolean, true if this function should check the point
+                   against all regions, even if it has already snapped to one
+        snapped - Boolean, true if point has snapped already, false if not
                   If point is already snapped, this function will just return
-        returns - (snappedPt, idxRegion, idxRPoint, idxREdge, snapped)
-            snappedPt - Point object, point after snapping
-            idxRegion - int, index of region if snapped to region point/edge
-                        if not snapped to region it will be -1
-            idxRPoint - int, index of point in region.verts if snapped to point
-                        if not snapped to point it will be -1
-            idxREdge - int, index of side in region if snapped to edge
-                       edge j is defined by region.verts[j:j+1]
-                       if not snapped to edge it will be -1
-            snapped - Boolean, true if point has been snapped, false if not
-                      Note that if input snapped is true, output will be true
-                      even if the point did not snap to a region point or edge
+        returns -
+            If checkAll is true, then the return will be a list containing
+            tuples in the format (snappedPt, idxRegion, idxRPoint, idxREdge),
+            where each entry is as described below. If there is no snapping
+            then the list will be empty.
+            If checkAll is false, then a single tuple will be returned:
+            (snappedPt, idxRegion, idxRPoint, idxREdge, snapped)
+                snappedPt - Point object, point after snapping
+                idxRegion - int, index of region if snapped to region point/edge
+                            if not snapped to region it will be -1
+                idxRPoint - int, index of point in region.verts if snapped to point
+                            if not snapped to point it will be -1
+                idxREdge - int, index of side in region if snapped to edge
+                           edge j is defined by region.verts[j:j+1]
+                           if not snapped to edge it will be -1
+                snapped - Boolean, true if point has been snapped, false if not
+                          Note that if input snapped is true, output will be true
+                          even if the point did not snap to a region point or edge
         """
-        idxRegion = -1
-        idxRPoint = -1
-        idxREdge = -1
-        i = 0       # Region incrementer
-        while (not snapped) and i < len(self.regions):
+        # Initialize output
+        if not checkAll:
+            idxRegion = -1
+            idxRPoint = -1
+            idxREdge = -1
+        else:
+            output = []
+        
+        # Check through regions
+        i = len(self.regions) - 1   # Region decrementer
+        while (checkAll or not snapped) and i >= 0:
             pt, idxRPoint, idxREdge, snapped = \
-                self.Snap1Region(self.regions[i], pt, snapped)
-            if snapped:
+                self.Snap1Region(self.regions[i], pt, \
+                snapped=(not checkAll and snapped))
+            if idxRPoint != -1 or idxREdge != -1:
                 idxRegion = i
-            i += 1
-
-        return pt, idxRegion, idxRPoint, idxREdge, snapped
+                if checkAll:
+                    output.append((pt, idxRegion, idxRPoint, idxREdge))
+            i -= 1
+        
+        if not checkAll:
+            return pt, idxRegion, idxRPoint, idxREdge, snapped
+        else:
+            return output
     
-    def Snap1Region(self, region, pt, snapped):
+    def Snap1Region(self, region, pt, snapped=False):
         """Snap the point to any sufficiently "nearby" region vertex or wall
         in the specified region.
         
@@ -1102,7 +1413,7 @@ class regionEditor(wx.Frame):
         
         return pt, idxRPoint, idxREdge, snapped
     
-    def SnapPoly(self, pt, snapped):
+    def SnapPoly(self, pt, snapped=False):
         """Snap the point to any vertex in the currently being created region
         if it is sufficiently "nearby".
 
@@ -1155,7 +1466,23 @@ class regionEditor(wx.Frame):
             i += 1
 
         return pt, idxMarker, snapped
-
+    
+    def InsideRegions(self, pt):
+        """Find region containing point. Looks through regions on top first
+        (those that were created later).
+        
+        pt - Point, point of interest
+        returns - int, index of containing region, or -1 if none
+        """
+        iReg = -1
+        i = len(self.regions) - 1
+        while iReg == -1 and i >= 0:
+            if self.regions[i].PtInRegion(pt):
+                iReg = i
+            i -= 1
+        
+        return iReg
+    
     def Map2Pix(self, pose):
         """Convert from map coordinates to pixel coordinates.
 
@@ -1301,35 +1628,100 @@ class FeedbackDialog(wx.Dialog):
             self.currPt = 0
 # end of class FeedbackDialog
 
+class RegionEditDialog(wx.Dialog):
+    def __init__(self, *args, **kwds):
+        # begin wxGlade: RegionEditDialog.__init__
+        kwds["style"] = wx.DEFAULT_DIALOG_STYLE
+        wx.Dialog.__init__(self, *args, **kwds)
+        self.label_1 = wx.StaticText(self, -1, "Name: ")
+        self.textName = wx.TextCtrl(self, -1, "")
+        self.label_2 = wx.StaticText(self, -1, "Color: ")
+        self.colorPicker = wx.ColourPickerCtrl(self, -1)
+        self.chkbxObst = wx.CheckBox(self, -1, "Treat as obstacle")
+        self.buttonOk = wx.Button(self, wx.ID_OK, "OK")
+        self.buttonCancel = wx.Button(self, wx.ID_CANCEL, "Cancel")
+
+        self.__set_properties()
+        self.__do_layout()
+        # end wxGlade
+
+    def __set_properties(self):
+        # begin wxGlade: RegionEditDialog.__set_properties
+        self.SetTitle("Edit Region")
+        self.colorPicker.SetMinSize((40, 40))
+        # end wxGlade
+
+    def __do_layout(self):
+        # begin wxGlade: RegionEditDialog.__do_layout
+        sizer_2 = wx.BoxSizer(wx.VERTICAL)
+        sizer_5 = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_4 = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_3 = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_3.Add(self.label_1, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_3.Add(self.textName, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_2.Add(sizer_3, 1, wx.EXPAND, 0)
+        sizer_4.Add(self.label_2, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_4.Add(self.colorPicker, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_2.Add(sizer_4, 1, wx.EXPAND, 0)
+        sizer_2.Add(self.chkbxObst, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
+        sizer_5.Add(self.buttonOk, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_5.Add(self.buttonCancel, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 8)
+        sizer_2.Add(sizer_5, 1, wx.EXPAND, 0)
+        self.SetSizer(sizer_2)
+        sizer_2.Fit(self)
+        self.Layout()
+        # end wxGlade
+# end of class RegionEditDialog
 
 class Region:
-    def __init__(self, points, name, rgb=None):   # TODO: random color/name
+    def __init__(self, points, name, rgb=None):
         """Create an object to represent a region.
 
-        points - List of tuples of floats containing vertex information
-                 [(x1, y1), (x2, y2), ...]
+        points - List of Points containing vertex information
+                 [Point(x1, y1), Point(x2, y2), ...]
         name - String defining region name
         rgb - List of integers defining color
               [red, green, blue], each with value in range [0 255]
         """
-        # TODO: Add name, color, convex/concave, possibly adjoining edges
+        # TODO: Add convex/concave
         self.verts = points
         self.name = name
         if not rgb:
             rgb = [random.randint(0, 255), random.randint(0, 255), \
                 random.randint(0,255)]
-        self.color = rgb
+        self.color = wx.Colour(rgb[0], rgb[1], rgb[2])
+        self.isObstacle = False
     
     def __str__(self):
         """Representation of object."""
-        s = "%s\t{%03d\t%03d\t%03d}\t[" % \
-            (self.name, self.color[0], self.color[1], self.color[2])
+        s = "%s\t{%03d\t%03d\t%03d}\t[" % (self.name, self.color.Red(), \
+            self.color.Green(), self.color.Blue())
         for iPt, pt in enumerate(self.verts):
             s += str(pt)
             if iPt < len(self.verts) - 1:
                 s += "\t"
         s += "]"
         return s
+    
+    def PtInRegion(self, pt):
+        """Check if a point is inside of the region.
+        Algorithm taken from C# version of Solution 1 from
+        http://local.wasp.uwa.edu.au/~pbourke/geometry/insidepoly/
+        
+        pt - Point to check
+        returns - Boolean, True if the point is inside of the region
+        """
+        result = False
+        n = len(self.verts)
+        for i in range(n):
+            j = (i + 1) % n
+            if ((self.verts[j].y <= pt.y and pt.y < self.verts[i].y) or \
+                    (self.verts[i].y <= pt.y and pt.y < self.verts[j].y)) and \
+                    pt.x < (self.verts[i].x - self.verts[j].x) * \
+                    (pt.y - self.verts[j].y) / \
+                    (self.verts[i].y - self.verts[j].y) + self.verts[j].x:
+                result = not result
+        return result
 # end of class Region
 
 
@@ -1435,6 +1827,11 @@ class Point:
     def __truediv__(self, other):
         """True division operator."""
         return self.__div__(other)
+    
+    def Set(self, x, y):
+        """Change the value of the point."""
+        self.x = x
+        self.y = y
 
     def Dot(self, other):
         """Dot product."""

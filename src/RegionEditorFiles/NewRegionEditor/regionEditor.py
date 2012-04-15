@@ -13,8 +13,10 @@ import socket
 import struct
 import copy
 import random
+import re
 import winsound
 import pyttsx
+import lib.fileMethods as fileMethods
 
 # begin wxGlade: extracode
 # end wxGlade
@@ -295,8 +297,86 @@ class regionEditor(wx.Frame):
         event.Skip()
     
     def OnMenuOpen(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuOpen' not implemented"
-        event.Skip()
+        # Start up save dialog
+        dialogOpen = wx.FileDialog(self, message="Open File", \
+            defaultDir=sys.path[0], \
+            defaultFile=self.fileName.split('\\').pop(), \
+            wildcard="*.regions", style=wx.FD_OPEN)
+        
+        # Hit Open
+        if dialogOpen.ShowModal() == wx.ID_OK:
+            filePath = dialogOpen.GetPath()
+            if not os.path.exists(filePath) or not ('.regions' in filePath):
+                return
+            
+            # Pull all data from file into dictionary for parsing
+            data = fileMethods.readFromFile(filePath)
+            
+            if data is None:
+                return
+            
+            # Clear all current information
+            self.regions = []
+            self.adjacent = []
+            # self.bkgndImage = None
+            
+            # TODO: Uncomment when background image is included
+            #try:
+            #    self.bkgndImage = data["Background"][0]
+            #except KeyError:
+            #    self.bkgndImage = None
+            
+            # Set all region information from lines in file
+            # Each region line format is this:
+            #   Name {ColorR ColorG ColorB} [(x1 y1) (x2 y2) ...]
+            for rData in data["Regions"]:
+                rData = re.sub('[\[\]\(\)\{\}]', '', rData)
+                rData = rData.split()       # Separates on any whitespace
+                rName = rData[0]
+                rRGB = []
+                for i in range(1, 4):       # Convert colors to integers
+                    rRGB.append(int(rData[i]))
+                rVerts = []
+                for i in range(4, len(rData), 2):
+                    x = float(rData[i])
+                    y = float(rData[i+1])
+                    rVerts.append(Point(x, y))
+                region = Region(rVerts, rName, rgb=rRGB)
+                self.regions.append(region)
+
+            # Make an empty adjacency matrix of size (nRegions) x (nRegions)
+            self.adjacent = [[[] for j in range(len(self.regions))] \
+                for i in range(len(self.regions))]
+            
+            # Assign region transitions
+            # Each transition line format is this:
+            # Region1Idx Region2Idx [(Reg1FaceIdx1 Reg2FaceIdx1) (Reg1FaceIdx2 Reg2FaceIdx2) ...]
+            for tData in data["Transitions"]:
+                tData = re.sub('[\[\]\(\)]', '', tData)
+                tData = tData.split();      # Separate on any whitespace
+                iReg1 = int(tData[0])
+                iReg2 = int(tData[1])
+                faces = []
+                # All transitions between regions
+                for i in range(2, len(transData), 2):
+                    iFaceReg1 = int(tData[i])
+                    iFaceReg2 = int(tData[i+1])
+                    self.adjacent[iReg1][iReg2].append((iFaceReg1, iFaceReg2))
+                    # Note that region file specifies transitions in both directions
+                    # So mirroring here is unnecessary
+                    
+            # Set "obstacleness" of regions
+            if "Obstacles" in data:
+                for iReg in data["Obstacles"]:
+                    self.regions[iReg].isObstacle = True
+            
+            # Store the filename for saving
+            self.fileName = filePath
+        
+        # TODO: Rescale/pan map to bring full map into view
+        self.RedrawCanvas()
+        
+        dialogOpen.Destroy()
     
     def OnMenuSave(self, event):  # wxGlade: regionEditor.<event_handler>
         """Save to file that has already been used."""
@@ -305,8 +385,8 @@ class regionEditor(wx.Frame):
             f.write("# This is a region definition file for the LTLMoP " + \
                 "toolkit.\n# Format details are described at the " + \
                 "beginning of each section below.\n# Note that all values " + \
-                "are separated by *tabs*.\n\nBackground: # Relative path " + \
-                "of background image file\n")
+                "are separated by *whitespace*.\n\nBackground: # Relative " + \
+                "path of background image file\n")
             f.write("None\n\n")     # TODO: Support for background images
             f.write("Obstacles: # Indices of regions to treat as obstacles\n")
             f.write("\n\n")         # TODO: Support for obstacles
@@ -319,9 +399,6 @@ class regionEditor(wx.Frame):
             for reg in self.regions:
                 f.write(str(reg) + "\n")
             f.write("\n")
-            f.write("Thumbnail: # Relative path of image file that has " + \
-                "region shapes overlayed on background image\n")
-            f.write("None\n\n")         # TODO: Save png thumbnail
             f.write("Transitions: # Region1Idx Region2Idx " + \
                 "[(Reg1FaceIdx1 Reg2FaceIdx1) (Reg1FaceIdx2 Reg2FaceIdx2) " + \
                 "...]\n")
