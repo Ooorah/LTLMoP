@@ -575,7 +575,7 @@ class regionEditor(wx.Frame):
         # Creating a rectangular region
         elif self.toggleSquare.GetValue():
             # Making the second corner of rectangle
-            if self.polyVerts:
+            if self.polyVerts and pt.Dist(self.polyVerts[0]) > self.tolerance:
                 # Snap vertices to regions as necessary, not to Vicon
                 # This may result in a non-square region, but may be preferable
                 x0 = self.polyVerts[0].x
@@ -673,6 +673,7 @@ class regionEditor(wx.Frame):
                         self.regions[iReg].verts[iPt] + Point(dx, dy)
                     self.AddToUndo(Action(oldRegion, self.regions[iReg]))
                     self.polyVerts = []
+                    self.RecalcAdjacency(iReg)
                     self.RedrawCanvas()
         
         # Dragging region(s) or vertices
@@ -759,7 +760,7 @@ class regionEditor(wx.Frame):
             iReg = self.selectedRegions.pop()
             self.selectedRegions = []
             self.selectedRegions.append(iReg)
-            self.EditRegion(self.regions[iReg])
+            self.EditRegion(iReg)
             
     
     def OnMouseRightDown(self, event):
@@ -872,26 +873,33 @@ class regionEditor(wx.Frame):
         
         # Create device context if not created
         if not dc:
-            dc = wx.WindowDC(self.canvas)
+            windc = wx.WindowDC(self.canvas)
+            dc = wx.GCDC(windc)
+            self.canvas.PrepareDC(dc)
+            dc.BeginDrawing()
         
         # Draw grid background
         self.DrawGrid(dc)
         
-        # Redraw all markers
-        self.DrawMarkers(self.markerPoses, dc)
+        # Redraw boundary region
+        if self.boundary:
+            self.DrawRegion(self.boundary, dc, boundary=True)
         
         # Redraw all regions
         for region in self.regions:
-            self.DrawRegion(region, dc)
+            self.DrawRegion(region, dc=dc)
         
         # Redraw all transition face indicators
         # Lower triangular matrix only
         for iReg in range(1, len(self.adjacent)):
-            self.DrawAdjacencies(iReg, dc)
+            self.DrawAdjacencies(iReg, dc=dc)
+        
+        # Redraw all markers
+        self.DrawMarkers(self.markerPoses, dc=dc)
         
         # Redraw selection handles
         for iReg in self.selectedRegions:
-            self.DrawSelectionHandle(iReg, dc)
+            self.DrawSelectionHandle(iReg, dc=dc)
         
         # Redraw partial region
         if self.toggleSquare.GetValue() or self.togglePoly.GetValue():
@@ -899,6 +907,8 @@ class regionEditor(wx.Frame):
                 ptPix1 = self.Map2Pix(self.polyVerts[iVert])
                 ptPix2 = self.Map2Pix(self.polyVerts[iVert + 1])
                 dc.DrawLine(ptPix1[0], ptPix1[1], ptPix2[0], ptPix2[1])
+        
+        dc.EndDrawing()
     
     def DrawGrid(self, dc=None):
         """Draw the axes and grid on the map canvas.
@@ -906,8 +916,13 @@ class regionEditor(wx.Frame):
         dc - Device context used for drawing on the canvas panel.
         """
         # Create device context if not created
+        isNewDC = False
         if not dc:
-            dc = wx.WindowDC(self.canvas)
+            isNewDC = True
+            windc = wx.WindowDC(self.canvas)
+            dc = wx.GCDC(windc)
+            self.canvas.PrepareDC(dc)
+            dc.BeginDrawing()
 
         # Draw axes
         xOff = self.canvasOffset.x
@@ -917,8 +932,11 @@ class regionEditor(wx.Frame):
         colLim, rowLim = self.canvas.GetSize()
         dc.DrawLine(0, yPixOff, colLim, yPixOff)
         dc.DrawLine(xPixOff, 0, xPixOff, rowLim)
-
+        
         # TODO: Draw grid/ticks
+        
+        if isNewDC:
+            dc.EndDrawing()
 
     def DrawMarkers(self, poses, dc=None):
         """Draw markers at specified global positions.
@@ -928,13 +946,21 @@ class regionEditor(wx.Frame):
         dc - Device context used for drawing on the canvas panel.
         """
         # Create device context if not created
+        isNewDC = False
         if not dc:
-            dc = wx.WindowDC(self.canvas)
+            isNewDC = True
+            windc = wx.WindowDC(self.canvas)
+            dc = wx.GCDC(windc)
+            self.canvas.PrepareDC(dc)
+            dc.BeginDrawing()
 
         # Draw each marker
         for pose in poses:
             posePix = self.Map2Pix(pose)
             dc.DrawCircle(posePix[0], posePix[1], 5)
+        
+        if isNewDC:
+            dc.EndDrawing()
     
     def DrawSelectionHandle(self, iReg, dc=None):
         """Draw markers indicating region(s) that have been selected by mouse.
@@ -943,28 +969,85 @@ class regionEditor(wx.Frame):
         dc - Device context used for drawing on the canvas panel
         """
         # Create device context if not created
+        isNewDC = False
         if not dc:
-            dc = wx.WindowDC(self.canvas)
+            isNewDC = True
+            windc = wx.WindowDC(self.canvas)
+            dc = wx.GCDC(windc)
+            self.canvas.PrepareDC(dc)
+            dc.BeginDrawing()
         
         for pt in self.regions[iReg].verts:
             ptPix = self.Map2Pix(pt)
             dc.DrawCircle(ptPix[0], ptPix[1], 5)
+        
+        if isNewDC:
+            dc.EndDrawing()
 
-    def DrawRegion(self, region, dc=None):
+    def DrawRegion(self, region, dc=None, isBoundary=False):
         """Draw a single region.
 
         region - Instance of Region class, contains information about the region.
         dc - Device context used for drawing on the canvas panel.
+        isBoundary - Boolean, true if drawing the boundary region.
         """
         # Create device context if not created
+        isNewDC = False
         if not dc:
-            dc = wx.WindowDC(self.canvas)
-
+            isNewDC = True
+            windc = wx.WindowDC(self.canvas)
+            dc = wx.GCDC(windc)
+            self.canvas.PrepareDC(dc)
+            dc.BeginDrawing()
+        
+        # Set brush to region color
+        innerColor = wx.Colour(region.color.Red(), region.color.Green(), \
+            region.color.Blue(), 128)
+        if not isBoundary:
+            dc.SetBrush(wx.Brush(innerColor, wx.SOLID))
+        else:
+            dc.SetBrush(wx.Brush(region.color, wx.TRANSPARENT))
+        dc.SetPen(wx.Pen(region.color, 1, wx.SOLID))
+        dc.SetTextForeground(wx.BLACK)
+        dc.SetBackgroundMode(wx.TRANSPARENT)
+        dc.SetFont(wx.Font(12, wx.FONTFAMILY_SWISS, wx.NORMAL, wx.BOLD, False))
+        
+        # Set up label
+        if region.isObstacle:
+            labelText = "(%s)" % region.name
+        else:
+            labelText = region.name
+        labelWidth, labelHeight = dc.GetTextExtent(labelText)
+        
         # Draw region
         vertsPix = []
+        xLabelPix = 0
+        yLabelPix = 0
         for vert in region.verts:
-            vertsPix.append(self.Map2Pix(vert))
+            vertPix = self.Map2Pix(vert)
+            vertsPix.append(vertPix)
+            if not isBoundary:          # Put label in center
+                xLabelPix += vertPix[0]
+                yLabelPix += vertPix[1]
+            else:                       # Put label in lower right corner
+                xLabelPix = max(xLabelPix, vertPix[0])
+                yLabelPix = max(yLabelPix, vertPix[1])
         dc.DrawPolygon(vertsPix)
+        if isBoundary:
+            xLabelPix = xLabelPix / len(region.verts) - labelWidth
+            yLabelPix = yLabelPix / len(region.verts) - labelHeight
+        else:
+            xLabelPix = xLabelPix / len(region.verts) - labelWidth / 2
+            yLabelPix = yLabelPix / len(region.verts) - labelHeight / 2
+        
+        # Draw label
+        dc.SetBrush(wx.Brush(region.color, wx.SOLID))
+        dc.DrawRoundedRectangle(xLabelPix - 5, yLabelPix - 3, \
+            labelWidth + 10, labelHeight + 6, 3)
+        dc.DrawText(labelText, xLabelPix, yLabelPix)
+        
+        if isNewDC:
+            dc.EndDrawing()
     
     def DrawAdjacencies(self, iReg, dc=None):
         """Draw lines to show adjacent region faces for one region.
@@ -975,9 +1058,11 @@ class regionEditor(wx.Frame):
         """
         # Create device context if not created
         if not dc:
-            dc = wx.WindowDC(self.canvas)
-        oldPen = dc.GetPen()
-        dc.SetPen(wx.Pen(wx.Colour(255, 0, 0, 100), 3, wx.SHORT_DASH))
+            windc = wx.WindowDC(self.canvas)
+            dc = wx.GCDC(windc)
+            self.canvas.PrepareDC(dc)
+            dc.BeginDrawing()
+        dc.SetPen(wx.Pen(wx.Colour(255, 0, 0), 3, wx.SHORT_DASH))
         
         # Iterate adjacency matrix looking for shared faces for one region
         # Only need to iterate through lower triangle (not counting diagonal) 
@@ -994,7 +1079,6 @@ class regionEditor(wx.Frame):
                 pt1Pix = self.Map2Pix(pt1)
                 pt2Pix = self.Map2Pix(pt2)
                 dc.DrawLine(pt1Pix[0], pt1Pix[1], pt2Pix[0], pt2Pix[1])
-        dc.SetPen(oldPen)   # TODO: Maybe can remove if everything sets own pen
     
     def ResetMapToggles(self, toggleStay=None):
         """Clear all the other map-feature toggle buttons.
@@ -1096,16 +1180,17 @@ class regionEditor(wx.Frame):
                     self.adjacent[jReg][iReg].\
                         append((otherRegFace, thisRegFace + 1))
     
-    def EditRegion(self, reg):
+    def EditRegion(self, iReg):
         """Show the edit region dialog.
         Allow user to change name, color, and obstacleness of a region.
         
-        reg - Region to edit
+        iReg - Index of region to edit
         """
         # Create dialog
         regEdDia = RegionEditDialog(self, wx.ID_ANY, "Edit Region Information")
         
         # Set appropriate control values
+        reg = self.regions[iReg]
         regEdDia.textName.SetValue(reg.name)
         regEdDia.colorPicker.SetColour(reg.color)
         regEdDia.chkbxObst.SetValue(reg.isObstacle)
@@ -1132,6 +1217,11 @@ class regionEditor(wx.Frame):
                 wx.MessageBox("Region with name \"%s\" already exists." % \
                     (regEdDia.textName.GetValue()), "Error", \
                     style = wx.OK | wx.ICON_ERROR)
+        
+        # Check for boundary
+        if reg.name.lower() == 'boundary':
+            self.boundary = reg
+            self.DeleteRegion(iReg)
         
         # Redraw the regions to ensure correct name/color
         self.RedrawCanvas()
@@ -1672,6 +1762,173 @@ class RegionEditDialog(wx.Dialog):
         self.Layout()
         # end wxGlade
 # end of class RegionEditDialog
+
+class CalibrationFrame(wx.Frame):
+    def __init__(self, *args, **kwds):
+        # begin wxGlade: CalibrationFrame.__init__
+        kwds["style"] = wx.DEFAULT_FRAME_STYLE
+        wx.Frame.__init__(self, *args, **kwds)
+        
+        # Menu Bar
+        self.calibFrame_menubar = wx.MenuBar()
+        self.filemenu = wx.Menu()
+        self.menuSave = wx.MenuItem(self.filemenu, wx.NewId(), "Save", "", wx.ITEM_NORMAL)
+        self.filemenu.AppendItem(self.menuSave)
+        self.menuExit = wx.MenuItem(self.filemenu, wx.NewId(), "Exit", "", wx.ITEM_NORMAL)
+        self.filemenu.AppendItem(self.menuExit)
+        self.calibFrame_menubar.Append(self.filemenu, "File")
+        self.editmenu = wx.Menu()
+        self.menuUndo = wx.MenuItem(self.editmenu, wx.NewId(), "Undo", "", wx.ITEM_NORMAL)
+        self.editmenu.AppendItem(self.menuUndo)
+        self.menuRedo = wx.MenuItem(self.editmenu, wx.NewId(), "Redo", "", wx.ITEM_NORMAL)
+        self.editmenu.AppendItem(self.menuRedo)
+        self.menuSelectAll = wx.MenuItem(self.editmenu, wx.NewId(), "Select All", "", wx.ITEM_NORMAL)
+        self.editmenu.AppendItem(self.menuSelectAll)
+        self.menuClearAll = wx.MenuItem(self.editmenu, wx.NewId(), "Clear All", "", wx.ITEM_NORMAL)
+        self.editmenu.AppendItem(self.menuClearAll)
+        self.calibFrame_menubar.Append(self.editmenu, "Edit")
+        self.toolsmenu = wx.Menu()
+        self.menuShowMarkers = wx.MenuItem(self.toolsmenu, wx.NewId(), "Show Markers", "", wx.ITEM_CHECK)
+        self.toolsmenu.AppendItem(self.menuShowMarkers)
+        self.menuClearMarkers = wx.MenuItem(self.toolsmenu, wx.NewId(), "Clear Markers", "", wx.ITEM_NORMAL)
+        self.toolsmenu.AppendItem(self.menuClearMarkers)
+        self.menuLoadImage = wx.MenuItem(self.toolsmenu, wx.NewId(), "Load Image", "", wx.ITEM_NORMAL)
+        self.toolsmenu.AppendItem(self.menuLoadImage)
+        self.menuClearImage = wx.MenuItem(self.toolsmenu, wx.NewId(), "Clear Image", "", wx.ITEM_NORMAL)
+        self.toolsmenu.AppendItem(self.menuClearImage)
+        self.calibFrame_menubar.Append(self.toolsmenu, "Tools")
+        self.helpmenu = wx.Menu()
+        self.menuHowTo = wx.MenuItem(self.helpmenu, wx.NewId(), "How To Use", "", wx.ITEM_NORMAL)
+        self.helpmenu.AppendItem(self.menuHowTo)
+        self.menuAbout = wx.MenuItem(self.helpmenu, wx.NewId(), "About", "", wx.ITEM_NORMAL)
+        self.helpmenu.AppendItem(self.menuAbout)
+        self.calibFrame_menubar.Append(self.helpmenu, "Help")
+        self.SetMenuBar(self.calibFrame_menubar)
+        # Menu Bar end
+        self.sidebar = wx.Panel(self, -1)
+        self.toggleVicon = wx.ToggleButton(self.sidebar, -1, "Markers")
+        self.buttonImage = wx.Button(self.sidebar, -1, "Image")
+        self.toggleAddPoint = wx.ToggleButton(self.sidebar, -1, "Point +")
+        self.toggleDeletePoint = wx.ToggleButton(self.sidebar, -1, "Point -")
+        self.map = wx.Panel(self, -1, style=wx.SUNKEN_BORDER | wx.TAB_TRAVERSAL)
+        self.reference = wx.Panel(self, -1, style=wx.SUNKEN_BORDER | wx.TAB_TRAVERSAL)
+
+        self.__set_properties()
+        self.__do_layout()
+
+        self.Bind(wx.EVT_MENU, self.OnMenuSave, self.menuSave)
+        self.Bind(wx.EVT_MENU, self.OnMenuExit, self.menuExit)
+        self.Bind(wx.EVT_MENU, self.OnMenuUndo, self.menuUndo)
+        self.Bind(wx.EVT_MENU, self.OnMenuRedo, self.menuRedo)
+        self.Bind(wx.EVT_MENU, self.OnMenuSelectAll, self.menuSelectAll)
+        self.Bind(wx.EVT_MENU, self.OnMenuClearAll, self.menuClearAll)
+        self.Bind(wx.EVT_MENU, self.OnMenuShowMarkers, self.menuShowMarkers)
+        self.Bind(wx.EVT_MENU, self.OnMenuClearMarkers, self.menuClearMarkers)
+        self.Bind(wx.EVT_MENU, self.OnMenuLoadImage, self.menuLoadImage)
+        self.Bind(wx.EVT_MENU, self.OnMenuClearImage, self.menuClearImage)
+        self.Bind(wx.EVT_MENU, self.OnMenuHowTo, self.menuHowTo)
+        self.Bind(wx.EVT_MENU, self.OnMenuAbout, self.menuAbout)
+        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleVicon, self.toggleVicon)
+        self.Bind(wx.EVT_BUTTON, self.OnButtonImage, self.buttonImage)
+        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleAddPoint, self.toggleAddPoint)
+        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleDeletePoint, self.toggleDeletePoint)
+        # end wxGlade
+
+    def __set_properties(self):
+        # begin wxGlade: CalibrationFrame.__set_properties
+        self.SetTitle("Map Calibration")
+        self.toggleVicon.SetMinSize((50, 50))
+        self.buttonImage.SetMinSize((50, 50))
+        self.toggleAddPoint.SetMinSize((50, 50))
+        self.toggleDeletePoint.SetMinSize((50, 50))
+        self.sidebar.SetMinSize((100, 300))
+        self.map.SetMinSize((320, 320))
+        self.map.SetBackgroundColour(wx.Colour(255, 255, 255))
+        self.reference.SetMinSize((320, 320))
+        self.reference.SetBackgroundColour(wx.Colour(255, 255, 255))
+        # end wxGlade
+
+    def __do_layout(self):
+        # begin wxGlade: CalibrationFrame.__do_layout
+        sizer_6 = wx.BoxSizer(wx.HORIZONTAL)
+        grid_sizer_2 = wx.GridSizer(2, 2, 5, 5)
+        grid_sizer_2.Add(self.toggleVicon, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
+        grid_sizer_2.Add(self.buttonImage, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
+        grid_sizer_2.Add(self.toggleAddPoint, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
+        grid_sizer_2.Add(self.toggleDeletePoint, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
+        self.sidebar.SetSizer(grid_sizer_2)
+        sizer_6.Add(self.sidebar, 0, wx.EXPAND, 0)
+        sizer_6.Add(self.map, 1, wx.RIGHT | wx.EXPAND, 3)
+        sizer_6.Add(self.reference, 1, wx.LEFT | wx.EXPAND, 3)
+        self.SetSizer(sizer_6)
+        sizer_6.Fit(self)
+        self.Layout()
+        # end wxGlade
+
+    def OnMenuSave(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuSave' not implemented!"
+        event.Skip()
+
+    def OnMenuExit(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuExit' not implemented!"
+        event.Skip()
+
+    def OnMenuUndo(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuUndo' not implemented!"
+        event.Skip()
+
+    def OnMenuRedo(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuRedo' not implemented!"
+        event.Skip()
+
+    def OnMenuSelectAll(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuSelectAll' not implemented!"
+        event.Skip()
+
+    def OnMenuClearAll(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuClearAll' not implemented!"
+        event.Skip()
+
+    def OnMenuShowMarkers(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuShowMarkers' not implemented!"
+        event.Skip()
+
+    def OnMenuClearMarkers(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuClearMarkers' not implemented!"
+        event.Skip()
+
+    def OnMenuLoadImage(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuLoadImage' not implemented!"
+        event.Skip()
+
+    def OnMenuClearImage(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuClearImage' not implemented!"
+        event.Skip()
+
+    def OnMenuHowTo(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuHowTo' not implemented!"
+        event.Skip()
+
+    def OnMenuAbout(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnMenuAbout' not implemented!"
+        event.Skip()
+
+    def OnToggleVicon(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnToggleVicon' not implemented!"
+        event.Skip()
+
+    def OnButtonImage(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnButtonImage' not implemented!"
+        event.Skip()
+
+    def OnToggleAddPoint(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnToggleAddPoint' not implemented!"
+        event.Skip()
+
+    def OnToggleDeletePoint(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        print "Event handler `OnToggleDeletePoint' not implemented!"
+        event.Skip()
+# end of class CalibrationFrame
 
 class Region:
     def __init__(self, points, name, rgb=None):
