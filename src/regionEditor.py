@@ -85,6 +85,7 @@ class regionEditor(wx.Frame):
         self.toggleSquare = wx.ToggleButton(self.sidebar, -1, "Rect.")
         self.togglePoly = wx.ToggleButton(self.sidebar, -1, "Polygon")
         self.toggleDim = wx.ToggleButton(self.sidebar, -1, "Length")
+        self.buttonAutobound = wx.Button(self.sidebar, -1, "Boundary")
         self.toggleFeedback = wx.ToggleButton(self.sidebar, -1, "Feedback")
         self.buttonCal = wx.Button(self.sidebar, -1, "Calibrate")
         self.canvas = wx.Panel(self, -1, style=wx.SUNKEN_BORDER | wx.TAB_TRAVERSAL)
@@ -115,6 +116,7 @@ class regionEditor(wx.Frame):
         self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleSquare, self.toggleSquare)
         self.Bind(wx.EVT_TOGGLEBUTTON, self.OnTogglePoly, self.togglePoly)
         self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleDim, self.toggleDim)
+        self.Bind(wx.EVT_BUTTON, self.OnButtonAutobound, self.buttonAutobound)
         self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleFeedback, self.toggleFeedback)
         self.Bind(wx.EVT_BUTTON, self.OnButtonCal, self.buttonCal)
         # end wxGlade
@@ -212,9 +214,10 @@ class regionEditor(wx.Frame):
         self.toggleSquare.SetMinSize((50, 50))
         self.togglePoly.SetMinSize((50, 50))
         self.toggleDim.SetMinSize((50, 50))
+        self.buttonAutobound.SetMinSize((50, 50))
         self.toggleFeedback.SetMinSize((50, 50))
         self.buttonCal.SetMinSize((50, 50))
-        self.sidebar.SetMinSize((150, 400))
+        self.sidebar.SetMinSize((120, 400))
         self.canvas.SetMinSize((800, 400))
         self.canvas.SetBackgroundColour(wx.Colour(255, 255, 255))
         # end wxGlade
@@ -228,6 +231,7 @@ class regionEditor(wx.Frame):
         grid_sizer_1.Add(self.toggleSquare, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
         grid_sizer_1.Add(self.togglePoly, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
         grid_sizer_1.Add(self.toggleDim, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
+        grid_sizer_1.Add(self.buttonAutobound, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
         grid_sizer_1.Add(self.toggleFeedback, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
         grid_sizer_1.Add(self.buttonCal, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
         self.sidebar.SetSizer(grid_sizer_1)
@@ -256,7 +260,7 @@ class regionEditor(wx.Frame):
         else:
             self.viconListener.stop()
             self.Destroy()
-
+    
     def OnToggleVicon(self, event):  # wxGlade: regionEditor.<event_handler>
         # Switch Vicon streaming on or off based on state of toggle button
         if self.toggleVicon.GetValue():
@@ -269,21 +273,25 @@ class regionEditor(wx.Frame):
             self.viconListener.stop()
             # Reinitialize thread to enable restarting it
             self.viconListener = ViconMarkerListener(self)
-
+    
     def OnButtonCamera(self, event):  # wxGlade: regionEditor.<event_handler>
         print "Camera not yet implemented"
         # TODO
         event.Skip()
-
+    
     def OnToggleSquare(self, event):  # wxGlade: regionEditor.<event_handler>
         self.ResetMapToggles(self.toggleSquare)
-
+    
     def OnTogglePoly(self, event):  # wxGlade: regionEditor.<event_handler>
         self.ResetMapToggles(self.togglePoly)
-
+    
     def OnToggleDim(self, event):  # wxGlade: regionEditor.<event_handler>
         self.ResetMapToggles(self.toggleDim)
-
+    
+    def OnButtonAutobound(self, event):  # wxGlade: regionEditor.<event_handler>
+        self.Autoboundary()
+        self.RedrawCanvas()
+    
     def OnToggleFeedback(self, event):  # wxGlade: regionEditor.<event_handler>
         self.ResetMapToggles(self.toggleFeedback)
         if self.toggleFeedback.GetValue():
@@ -291,7 +299,7 @@ class regionEditor(wx.Frame):
             self.dlgFeedback.ShowModal()
         elif self.dlgFeedback:
             self.dlgFeedback.OnClose(None)
-
+    
     def OnButtonCal(self, event):  # wxGlade: regionEditor.<event_handler>
         self.ResetMapToggles()
         calibGUI = CalibrationFrame(self)
@@ -385,6 +393,18 @@ class regionEditor(wx.Frame):
     def OnMenuSave(self, event):  # wxGlade: regionEditor.<event_handler>
         """Save to file that has already been used."""
         if self.fileName:
+            # Bring up dialog box to ask about boundary if necessary
+            if self.regions and not self.boundary:
+                msg = "No boundary found. Automatically create rectangular boundary?"
+                boundDialog = wx.MessageDialog(self, msg, style=wx.YES_NO|wx.CANCEL|\
+                    wx.YES_DEFAULT|wx.ICON_EXCLAMATION|wx.STAY_ON_TOP)
+                boundDiaResult = boundDialog.ShowModal()
+                if boundDiaResult == wx.ID_YES:
+                    self.Autoboundary()
+                elif boundDiaResult == wx.ID_CANCEL:
+                    return
+            
+            # Save file
             f = open(self.fileName, 'w')
             f.write("# This is a region definition file for the LTLMoP " + \
                 "toolkit.\n# Format details are described at the " + \
@@ -396,9 +416,7 @@ class regionEditor(wx.Frame):
             f.write("\n\n")         # TODO: Support for obstacles
             f.write("Regions: # Name {ColorR ColorG ColorB} " + \
                 "[(x1 y1) (x2 y2) ...]\n")
-            if not self.boundary:
-                self.Autoboundary()
-            if self.boundary:       # Check in case there were no regions
+            if self.boundary:
                 f.write(str(self.boundary) + "\n")
             for reg in self.regions:
                 f.write(str(reg) + "\n")
@@ -518,8 +536,8 @@ class regionEditor(wx.Frame):
             self.RedrawCanvas()
 
     def OnMenuAutobound(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuAutobound' not implemented"
-        event.Skip()
+        self.Autoboundary()
+        self.RedrawCanvas()
 
     def OnMenuRect(self, event):  # wxGlade: regionEditor.<event_handler>
         print "Event handler `OnMenuRect' not implemented"
@@ -891,7 +909,7 @@ class regionEditor(wx.Frame):
         
         # Redraw boundary region
         if self.boundary:
-            self.DrawRegion(self.boundary, dc, boundary=True)
+            self.DrawRegion(self.boundary, dc, isBoundary=True)
         
         # Redraw all regions
         for region in self.regions:
@@ -1022,15 +1040,17 @@ class regionEditor(wx.Frame):
         # Set brush to region color
         if isBoundary:
             dc.SetBrush(wx.Brush(region.color, wx.TRANSPARENT))
+            dc.SetPen(wx.Pen(wx.BLACK, 3, wx.SOLID))
         elif region.isObstacle:
             obstColor = wx.Colour(region.color.Red() / 10, \
                 region.color.Green() / 10, region.color.Blue() / 10, 128)
             dc.SetBrush(wx.Brush(obstColor, wx.SOLID))
+            dc.SetPen(wx.Pen(region.color, 1, wx.SOLID))
         else:
             innerColor = wx.Colour(region.color.Red(), region.color.Green(), \
                 region.color.Blue(), 128)
             dc.SetBrush(wx.Brush(innerColor, wx.SOLID))
-        dc.SetPen(wx.Pen(region.color, 1, wx.SOLID))
+            dc.SetPen(wx.Pen(region.color, 1, wx.SOLID))
         dc.SetTextForeground(wx.BLACK)
         dc.SetBackgroundMode(wx.TRANSPARENT)
         dc.SetFont(wx.Font(12, wx.FONTFAMILY_SWISS, wx.NORMAL, wx.BOLD, False))
@@ -1057,16 +1077,17 @@ class regionEditor(wx.Frame):
                 yLabelPix = max(yLabelPix, vertPix[1])
         dc.DrawPolygon(vertsPix)
         if isBoundary:
-            xLabelPix = xLabelPix / len(region.verts) - labelWidth
-            yLabelPix = yLabelPix / len(region.verts) - labelHeight
+            xLabelPix = xLabelPix - labelWidth
+            yLabelPix = yLabelPix
         else:
             xLabelPix = xLabelPix / len(region.verts) - labelWidth / 2
             yLabelPix = yLabelPix / len(region.verts) - labelHeight / 2
         
         # Draw label
-        dc.SetBrush(wx.Brush(region.color, wx.SOLID))
-        dc.DrawRoundedRectangle(xLabelPix - 5, yLabelPix - 3, \
-            labelWidth + 10, labelHeight + 6, 3)
+        if not isBoundary:
+            dc.SetBrush(wx.Brush(region.color, wx.SOLID))
+            dc.DrawRoundedRectangle(xLabelPix - 5, yLabelPix - 3, \
+                labelWidth + 10, labelHeight + 6, 3)
         dc.DrawText(labelText, xLabelPix, yLabelPix)
         
         if isNewDC:
@@ -2224,6 +2245,7 @@ class CalibrationFrame(wx.Frame):
     def OnMapEnterWindow(self, event):
         """Set focus on map to enable zooming."""
         self.map.SetFocus()
+        self.RedrawMap()
     
     def OnMapLeaveWindow(self, event):
         """Return focus to main GUI."""
@@ -2284,6 +2306,7 @@ class CalibrationFrame(wx.Frame):
     def OnRefEnterWindow(self, event):
         """Set focus on reference panel to enable zooming."""
         self.ref.SetFocus()
+        self.RedrawRef()
     
     def OnRefLeaveWindow(self, event):
         """Return focus to main GUI."""
