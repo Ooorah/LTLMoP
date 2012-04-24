@@ -172,8 +172,6 @@ class regionEditor(wx.Frame):
         self.polySnaps = []                 # Keeps snap information for each
                                             # new region creation point
                                             # [(idxReg, idxPt, idxEdge), ...]
-        self.boundary = None                # Region representing the map bound
-        # TODO: When changing the name of a region, check if it is called boundary
         
         # Mouse-related parameters
         self.leftClickPt = Point(0.0, 0.0)  # Location of last left downclick
@@ -394,7 +392,7 @@ class regionEditor(wx.Frame):
         """Save to file that has already been used."""
         if self.fileName:
             # Bring up dialog box to ask about boundary if necessary
-            if self.regions and not self.boundary:
+            if self.regions and not self.ExistBoundary():
                 msg = "No boundary found. Automatically create rectangular boundary?"
                 boundDialog = wx.MessageDialog(self, msg, style=wx.YES_NO|wx.CANCEL|\
                     wx.YES_DEFAULT|wx.ICON_EXCLAMATION|wx.STAY_ON_TOP)
@@ -416,8 +414,6 @@ class regionEditor(wx.Frame):
             f.write("\n\n")         # TODO: Support for obstacles
             f.write("Regions: # Name {ColorR ColorG ColorB} " + \
                 "[(x1 y1) (x2 y2) ...]\n")
-            if self.boundary:
-                f.write(str(self.boundary) + "\n")
             for reg in self.regions:
                 f.write(str(reg) + "\n")
             f.write("\n")
@@ -907,10 +903,6 @@ class regionEditor(wx.Frame):
         # Draw grid background
         self.DrawGrid(dc)
         
-        # Redraw boundary region
-        if self.boundary:
-            self.DrawRegion(self.boundary, dc, isBoundary=True)
-        
         # Redraw all regions
         for region in self.regions:
             self.DrawRegion(region, dc=dc)
@@ -1020,12 +1012,11 @@ class regionEditor(wx.Frame):
         if isNewDC:
             dc.EndDrawing()
 
-    def DrawRegion(self, region, dc=None, isBoundary=False):
+    def DrawRegion(self, region, dc=None):
         """Draw a single region.
 
         region - Instance of Region class, contains information about the region.
         dc - Device context used for drawing on the canvas panel.
-        isBoundary - Boolean, true if drawing the boundary region.
         """
         # Create device context if not created
         isNewDC = False
@@ -1037,7 +1028,7 @@ class regionEditor(wx.Frame):
             dc.BeginDrawing()
         
         # Set brush to region color
-        # Set brush to region color
+        isBoundary = region.name.lower() == "boundary"
         if isBoundary:
             dc.SetBrush(wx.Brush(region.color, wx.TRANSPARENT))
             dc.SetPen(wx.Pen(wx.BLACK, 3, wx.SOLID))
@@ -1078,7 +1069,6 @@ class regionEditor(wx.Frame):
         dc.DrawPolygon(vertsPix)
         if isBoundary:
             xLabelPix = xLabelPix - labelWidth
-            yLabelPix = yLabelPix
         else:
             xLabelPix = xLabelPix / len(region.verts) - labelWidth / 2
             yLabelPix = yLabelPix / len(region.verts) - labelHeight / 2
@@ -1262,11 +1252,6 @@ class regionEditor(wx.Frame):
                     (regEdDia.textName.GetValue()), "Error", \
                     style = wx.OK | wx.ICON_ERROR)
         
-        # Check for boundary
-        if reg.name.lower() == 'boundary':
-            self.boundary = reg
-            self.DeleteRegion(iReg)
-        
         # Redraw the regions to ensure correct name/color
         self.RedrawCanvas()
         # TODO: Add to undo
@@ -1286,7 +1271,8 @@ class regionEditor(wx.Frame):
         
         This will avoid redundant checking of regions. Note that the function
         will avoid checking against itself, so there is no reason to avoid
-        calling it on itself.
+        calling it on itself. It will also not check against the boundary
+        region.
         
         iReg - Index of region of interest
         iRegStart - Specifies to check reg against self.regions[iRegStart:]
@@ -1298,6 +1284,10 @@ class regionEditor(wx.Frame):
         
         # Pull region for easy access
         reg = self.regions[iReg]
+        
+        # Don't check for anything else if boundary
+        if reg.name.lower() == "boundary":
+            return
         
         # Keeps track of the colocation of vertices of this region with points
         # of other regions
@@ -1312,7 +1302,8 @@ class regionEditor(wx.Frame):
         # Check all other regions against this region
         for iOthReg in range(len(self.regions[iRegStart:])):
             # No need to check against self
-            if iOthReg == iReg:
+            if iOthReg == iReg or \
+                    self.regions[iOthReg].name.lower() == "boundary":
                 continue
             
             for iOthPt, othPt in enumerate(self.regions[iOthReg].verts):
@@ -1363,6 +1354,16 @@ class regionEditor(wx.Frame):
                     self.adjacent[iReg][iOthReg].append((iPt, iOthPt))
                     self.adjacent[iOthReg][iReg].append((iOthPt, iPt))
     
+    def ExistBoundary(self):
+        """Check if a boundary region has been defined."""
+        found = False
+        iReg = 0
+        while not found and iReg < len(self.regions):
+            found = self.regions[iReg].name.lower() == "boundary"
+            iReg += 1
+        
+        return found
+    
     def Autoboundary(self):
         """Automatically create region representing the boundary of the map."""
         if self.regions:
@@ -1370,7 +1371,7 @@ class regionEditor(wx.Frame):
             # Create region
             points = [Point(minx, maxy), Point(maxx, maxy), \
                 Point(maxx, miny), Point(minx, miny)]
-            self.boundary = Region(points, 'boundary')
+            self.regions.append(Region(points, 'boundary'))
         else:
             print "No regions defined, so no boundary created."
     
@@ -1617,7 +1618,7 @@ class regionEditor(wx.Frame):
     
     def InsideRegions(self, pt):
         """Find region containing point. Looks through regions on top first
-        (those that were created later).
+        (those that were created later). Does not return for boundary region.
         
         pt - Point, point of interest
         returns - int, index of containing region, or -1 if none
@@ -1625,7 +1626,8 @@ class regionEditor(wx.Frame):
         iReg = -1
         i = len(self.regions) - 1
         while iReg == -1 and i >= 0:
-            if self.regions[i].PtInRegion(pt):
+            if self.regions[i].name.lower() != "boundary" and \
+                    self.regions[i].PtInRegion(pt):
                 iReg = i
             i -= 1
         
@@ -1946,8 +1948,8 @@ class CalibrationFrame(wx.Frame):
         xScale = (xmax - xmin) / float(mapLen[0])
         yScale = (ymax - ymin) / float(mapLen[1])
         maxScale = max(xScale, yScale)
-        xOffset = xmin+(float(mapLen[0]) * maxScale - (xmax - xmin)) / 2
-        yOffset = ymax+(float(mapLen[1]) * maxScale - (ymax - ymin)) / 2
+        xOffset = xmin
+        yOffset = ymax
         self.mapScale = Point(maxScale, -maxScale)
         self.mapOffset = Point(xOffset, yOffset)
         # Determine initial mapping of the reference panel to the field
@@ -1956,8 +1958,8 @@ class CalibrationFrame(wx.Frame):
         xScale = (xmax - xmin) / float(refLen[0])
         yScale = (ymax - ymin) / float(refLen[1])
         maxScale = max(xScale, yScale)
-        xOffset = xmin+(float(refLen[0]) * maxScale - (xmax - xmin)) / 2
-        yOffset = ymax+(float(refLen[1]) * maxScale - (ymax - ymin)) / 2
+        xOffset = xmin
+        yOffset = ymax
         self.refScale = Point(maxScale, -maxScale)
         self.refOffset = Point(xOffset, yOffset)
         
@@ -2086,11 +2088,6 @@ class CalibrationFrame(wx.Frame):
         # TODO: Add this to undo in regionEditor somehow
         for reg in self.parent.regions:
             for pt in reg.verts:
-                ptMat = numpy.mat([pt.x, pt.y, 1.0]).T
-                newPtMat = T * ptMat
-                pt.Set(float(newPtMat[0]), float(newPtMat[1]))
-        if self.parent.boundary:
-            for pt in self.parent.boundary.verts:
                 ptMat = numpy.mat([pt.x, pt.y, 1.0]).T
                 newPtMat = T * ptMat
                 pt.Set(float(newPtMat[0]), float(newPtMat[1]))
@@ -2332,10 +2329,6 @@ class CalibrationFrame(wx.Frame):
         self.map.PrepareDC(dc)
         dc.BeginDrawing()
         
-        # Redraw boundary region
-        if self.parent.boundary:
-            self.DrawRegion(self.boundary, dc=dc, boundary=True)
-        
         # Redraw all regions
         for region in self.parent.regions:
             self.DrawRegion(region, dc=dc)
@@ -2385,25 +2378,27 @@ class CalibrationFrame(wx.Frame):
         #       vicon needs to be redrawn at a high frequency
         self.RedrawRef()
     
-    def DrawRegion(self, region, dc, isBoundary=False):
+    def DrawRegion(self, region, dc):
         """Draw a single region.
 
         region - Instance of Region class, contains information about the region.
         dc - Device context used for drawing on the panel.
-        isBoundary - Boolean, true if drawing the boundary region.
         """
         # Set brush to region color
+        isBoundary = region.name.lower() == "boundary"
         if isBoundary:
             dc.SetBrush(wx.Brush(region.color, wx.TRANSPARENT))
+            dc.SetPen(wx.Pen(wx.BLACK, 3, wx.SOLID))
         elif region.isObstacle:
             obstColor = wx.Colour(region.color.Red() / 10, \
                 region.color.Green() / 10, region.color.Blue() / 10, 128)
             dc.SetBrush(wx.Brush(obstColor, wx.SOLID))
+            dc.SetPen(wx.Pen(region.color, 1, wx.SOLID))
         else:
             innerColor = wx.Colour(region.color.Red(), region.color.Green(), \
                 region.color.Blue(), 128)
             dc.SetBrush(wx.Brush(innerColor, wx.SOLID))
-        dc.SetPen(wx.Pen(region.color, 1, wx.SOLID))
+            dc.SetPen(wx.Pen(region.color, 1, wx.SOLID))
         dc.SetTextForeground(wx.BLACK)
         dc.SetBackgroundMode(wx.TRANSPARENT)
         dc.SetFont(wx.Font(10, wx.FONTFAMILY_SWISS, wx.NORMAL, wx.BOLD, False))
@@ -2430,16 +2425,16 @@ class CalibrationFrame(wx.Frame):
                 yLabelPix = max(yLabelPix, vertPix[1])
         dc.DrawPolygon(vertsPix)
         if isBoundary:
-            xLabelPix = xLabelPix / len(region.verts) - labelWidth
-            yLabelPix = yLabelPix / len(region.verts) - labelHeight
+            xLabelPix = xLabelPix - labelWidth
         else:
             xLabelPix = xLabelPix / len(region.verts) - labelWidth / 2
             yLabelPix = yLabelPix / len(region.verts) - labelHeight / 2
         
         # Draw label
-        dc.SetBrush(wx.Brush(region.color, wx.SOLID))
-        dc.DrawRoundedRectangle(xLabelPix - 5, yLabelPix - 3, \
-            labelWidth + 10, labelHeight + 6, 3)
+        if not isBoundary:
+            dc.SetBrush(wx.Brush(region.color, wx.SOLID))
+            dc.DrawRoundedRectangle(xLabelPix - 5, yLabelPix - 3, \
+                labelWidth + 10, labelHeight + 6, 3)
         dc.DrawText(labelText, xLabelPix, yLabelPix)
     
     def DrawCalibPoint(self, ptPix, label, dc):

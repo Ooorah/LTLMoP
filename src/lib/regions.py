@@ -477,7 +477,6 @@ class RegionFileInterface:
         """
         regionDataList = []
         boundingBoxList = []
-        print dataFromAllRegions
         minxAll = float("inf")
         maxxAll = float("-inf")
         minyAll = float("inf")
