@@ -28,6 +28,7 @@ class parseLP:
 
         # load data
         self.proj = project.Project()
+        self.proj.setSilent(True)
         self.proj.loadProject(spec_file)
         
         # Look for a defined boundary region, and set it aside if available
@@ -71,7 +72,8 @@ class parseLP:
         self.removeSmallRegions()
         
         # decompose any regions with holes or are concave
-        self.decomp()
+        if self.proj.compile_options['convexify']:
+            self.decomp()
 
         # store the regionMapping data to project file
         self.proj.regionMapping = self.newPolysMap
@@ -252,7 +254,7 @@ class parseLP:
                         
         for region in smallRegion:
             #print "remove"+region
-            del self.portionOfRegion[region]
+            del self.portionOfRegion[region]            
             
     def intAllPoints(self,poly):
         """
@@ -274,7 +276,11 @@ class parseLP:
             newRegion.name              = nameOfPortion
             newRegion.color             = wx.Colour()
             newRegion.color.SetFromName(random.choice(['RED','ORANGE','YELLOW','GREEN','BLUE','PURPLE']))
-            newRegion.pointArray        = [wx.Point(*x) for x in Polygon.Utils.pointList(poly)]
+            for i,ct in enumerate(poly):
+                if poly.isHole(i):
+                    newRegion.holeList.append([wx.Point(*x) for x in Polygon.Utils.pointList(Polygon.Polygon(poly[i]))])
+                else:  
+                    newRegion.pointArray = [wx.Point(*x) for x in Polygon.Utils.pointList(Polygon.Polygon(poly[i]))]
             newRegion.alignmentPoints   = [False] * len([x for x in newRegion.getPoints()])    
             newRegion.recalcBoundingBox()
             

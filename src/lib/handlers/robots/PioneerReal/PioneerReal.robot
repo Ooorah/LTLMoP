@@ -1,33 +1,27 @@
 RobotName: # Robot Name
-Basic Simulated Robot
+Pioneer Real
 
 Type: # Robot type
-basicSim
+PioneerReal
 
 ActuatorHandler: # Robot default actuator handler with default argument values
-basicSimActuator()
+PioneerRealActuator()
 
 DriveHandler: # Robot default drive handler with default argument values
-holonomicDrive(multiplier=50.0,maxspeed=999.0)
+differentialDrive(d=0.6)
 
 InitHandler: # Robot default init handler with default argument values
-basicSimInit(init_region=None)
+PioneerRealInit(LocalIP='0.0.0.0',ListenerPort=6501,BroadcasterIP='10.255.255.255',BroadcasterPort=6502)
 
 LocomotionCommandHandler: # Robot locomotion command actuator handler with default argument values
-basicSimLocomotionCommand(speed=1.0)
+PioneerRealLocomotionCommand(scaleV=1.0,scaleW=1.0)
 
 MotionControlHandler: # Robot default motion control handler with default argument values
 vectorController()
 
 PoseHandler: # Robot default pose handler with default argument values
-basicSimPose()
+viconPose()
 
 SensorHandler: # Robot default sensor handler with default argument values
-basicSimSensor()
-
-CalibrationMatrix:
-array([[ 1, 0, 0],
-       [ 0, 1, 0],
-       [ 0, 0, 1]])
-
+PioneerRealSensor()
 

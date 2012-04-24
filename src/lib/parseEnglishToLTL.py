@@ -38,6 +38,8 @@ def writeSpec(text, sensorList, regionList, robotPropList):
         the region names and the list of robot propositions (other than regions). 
     '''
 
+    failed = False
+
     sensorList = copy.deepcopy(sensorList)
     robotPropList = copy.deepcopy(robotPropList)
 
@@ -139,11 +141,12 @@ def writeSpec(text, sensorList, regionList, robotPropList):
             QuantifierParts = QuantifierRE.search(line)
             quant_type = QuantifierParts.group('quantifier') 
             quant_group = QuantifierParts.group('groupName') 
-            print "found quantifier '%s' for group '%s'" % (quant_type, quant_group)
+            #print "found quantifier '%s' for group '%s'" % (quant_type, quant_group)
             if quant_group not in RegionGroups:
                 print 'ERROR(1): Could not parse the sentence in line '+ str(lineInd)+' :'
                 print line
                 print 'because no region grouping is previously defined for group name: ' + quant_group
+                failed = True
                 continue
 
             line = QuantifierRE.sub('QUANTIFIER_PLACEHOLDER',line)
@@ -152,10 +155,18 @@ def writeSpec(text, sensorList, regionList, robotPropList):
 
             quant_or_string = {}
             quant_and_string = {}
-            quant_or_string['current'] = "(" + " | ".join(RegionGroups[quant_group]) + ")"
-            quant_and_string['current'] = "(" + " & ".join(RegionGroups[quant_group]) + ")"
-            quant_or_string['next'] = "(" + " | ".join(map(nextify, RegionGroups[quant_group])) + ")"
-            quant_and_string['next'] = "(" + " & ".join(map(nextify, RegionGroups[quant_group])) + ")"
+            if len(RegionGroups[quant_group]) > 0:
+                quant_and_string['current'] = "(" + " & ".join(RegionGroups[quant_group]) + ")"
+                quant_and_string['next'] = "(" + " & ".join(map(nextify, RegionGroups[quant_group])) + ")"
+                quant_or_string['current'] = "(" + " | ".join(RegionGroups[quant_group]) + ")"
+                quant_or_string['next'] = "(" + " | ".join(map(nextify, RegionGroups[quant_group])) + ")"
+            else:
+                # With an empty group, it's impossible to be in any or all of them
+                quant_and_string['current'] = "FALSE"
+                quant_and_string['next'] = "FALSE"
+                quant_or_string['current'] = "FALSE"
+                quant_or_string['next'] = "FALSE"
+
             #quant_or_string['current'] = replaceLogicOp(quant_or_string['current'])
             #quant_and_string['current'] = replaceLogicOp(quant_and_string['current'])
             #quant_or_string['next'] = replaceLogicOp(quant_or_string['next'])
@@ -171,11 +182,15 @@ def writeSpec(text, sensorList, regionList, robotPropList):
             RegionGroups[groupName] = re.split(r"\s*,\s*", groupList)
             RegionGroups[groupName] = map(replaceLogicOp, RegionGroups[groupName])
 
+            # 'empty' is a no-op 
+            if 'empty' in RegionGroups[groupName]:
+                RegionGroups[groupName].remove('empty')
+
             # Allow equivalency between basic singular/plural references
             if groupName[-1] == "s":
                 RegionGroups[groupName[0:-1]] = RegionGroups[groupName]
 
-            print RegionGroups
+            #print RegionGroups
 
         # If the sentence describes the initial state of the environemnt
         elif EnvInitRE.search(line):
@@ -184,13 +199,18 @@ def writeSpec(text, sensorList, regionList, robotPropList):
             EnvInit = EnvInitRE.sub('',line)
 
             # parse the rest and return it to spec['EnvInit']
-            LTLsubformula = parseInit(EnvInit,sensorList,lineInd)
+            if len(sensorList) == 0:
+                LTLsubformula = ''
+            else:
+                LTLsubformula = parseInit(EnvInit,sensorList,lineInd)
+                if LTLsubformula == '': failed = True
 
             # this shouldn't even be possible, but check just in case:
             if "QUANTIFIER_PLACEHOLDER" in LTLsubformula:
                 print 'ERROR(15): Could not parse the sentence in line '+ str(lineInd)+' :'
                 print line
                 print 'because quantifiers are not valid in environment initial conditions'
+                failed = True
                 continue
 
             spec['EnvInit']= spec['EnvInit'] + LTLsubformula
@@ -223,9 +243,14 @@ def writeSpec(text, sensorList, regionList, robotPropList):
             if RegInit:
                 # parse regions
                 LTLRegSubformula = parseInit(RegInit,regionList + ["QUANTIFIER_PLACEHOLDER"],lineInd)
+                if LTLRegSubformula == '': failed = True
             if ActInit:
-                # parse Actions
-                LTLActSubformula = parseInit(ActInit,robotPropList,lineInd)
+                if len(robotPropList) == 0:
+                    LTLActSubformula = ''
+                else:
+                    # parse Actions
+                    LTLActSubformula = parseInit(ActInit,robotPropList,lineInd)
+                    if LTLActSubformula == '': failed = True
             
             if QuantifierFlag == "ANY":
                 LTLRegSubformula = LTLRegSubformula.replace("QUANTIFIER_PLACEHOLDER", quant_or_string['current'])
@@ -278,18 +303,21 @@ def writeSpec(text, sensorList, regionList, robotPropList):
 
                     # parse the liveness requirement
                     ReqFormulaInfo = parseLiveness(Requirement,sensorList,allRobotProp,lineInd)
+                    if ReqFormulaInfo['formula'] == '': failed = True
 
                     # If not SysGoals, then it is an error
                     if not ReqFormulaInfo['type']=='SysGoals':
                         print 'ERROR(15): Could not parse the sentence in line '+ str(lineInd)+' :'
                         print line
                         print 'because the requirement is not system liveness'
+                        failed = True
                         continue
 
                     if CondType == "IFF":
                         print 'ERROR(15): Could not parse the sentence in line '+ str(lineInd)+' :'
                         print line
                         print 'because IFF cannot be used with "stay there"'
+                        failed = True
                         continue
 
                     # add the 'stay there' as a condition (if R then stay there)
@@ -309,17 +337,20 @@ def writeSpec(text, sensorList, regionList, robotPropList):
                     # Parse the condition and add it to the requirement
                     CondFormulaInfo = parseConditional(Condition,condStayFormula,CondType,sensorList,allRobotProp,lineInd)
                     CondFormulaInfo['type'] = 'SysTrans'
+                    if CondFormulaInfo['formula'] == '': failed = True
 
                     spec[CondFormulaInfo['type']] = spec[CondFormulaInfo['type']] + CondFormulaInfo['formula']
                     linemap[CondFormulaInfo['type']].append(lineInd)
                 else:
                     # parse requirement normally
                     ReqFormulaInfo = parseLiveness(Requirement,sensorList,allRobotProp,lineInd)
+                    if ReqFormulaInfo['formula'] == '': failed = True
             elif SafetyRE.search(Requirement):
                 # remove first words
                 Requirement = SafetyRE.sub(' ',Requirement)
                 # and parse requirement
                 ReqFormulaInfo = parseSafety(Requirement,sensorList,allRobotProp,lineInd)
+                if ReqFormulaInfo['formula'] == '': failed = True
 
             elif StayRE.search(Requirement):
                 ReqFormulaInfo = {}
@@ -335,6 +366,7 @@ def writeSpec(text, sensorList, regionList, robotPropList):
                 print 'because could not resolve the requirement:'
                 print Requirement
                 print ''
+                failed = True
                 continue
 
             # Replace any quantifier in the requirement
@@ -346,10 +378,12 @@ def writeSpec(text, sensorList, regionList, robotPropList):
                     print line
                     print 'because the ANY quantifier is not currently supported in safety requirements'
                     print ''
+                    failed = True
                     continue
 
                 # Parse the condition and add it to the requirement
                 CondFormulaInfo = parseConditional(Condition,ReqFormulaInfo,CondType,sensorList,allRobotProp,lineInd)
+                if CondFormulaInfo['formula'] == '': failed = True
                 spec[CondFormulaInfo['type']] = spec[CondFormulaInfo['type']] + CondFormulaInfo['formula']
                 linemap[CondFormulaInfo['type']].append(lineInd)
             elif QuantifierFlag == "ALL":
@@ -359,11 +393,13 @@ def writeSpec(text, sensorList, regionList, robotPropList):
                     tmp_req['formula'] = tmp_req['formula'].replace("QUANTIFIER_PLACEHOLDER", r)
                     # Parse the condition and add it to the requirement
                     CondFormulaInfo = parseConditional(Condition,tmp_req,CondType,sensorList,allRobotProp,lineInd)
+                    if CondFormulaInfo['formula'] == '': failed = True
                     spec[CondFormulaInfo['type']] = spec[CondFormulaInfo['type']] + CondFormulaInfo['formula']
                     linemap[CondFormulaInfo['type']].append(lineInd)
             else:
                 # Parse the condition and add it to the requirement
                 CondFormulaInfo = parseConditional(Condition,ReqFormulaInfo,CondType,sensorList,allRobotProp,lineInd)
+                if CondFormulaInfo['formula'] == '': failed = True
                 spec[CondFormulaInfo['type']] = spec[CondFormulaInfo['type']] + CondFormulaInfo['formula']
                 linemap[CondFormulaInfo['type']].append(lineInd)
 
@@ -378,6 +414,7 @@ def writeSpec(text, sensorList, regionList, robotPropList):
 
             # Formulas defining when the proposition is true and false
             EventFormula = parseEvent(EventProp,SetEvent,ResetEvent,sensorList,allRobotProp,lineInd)
+            if EventFormula == '': failed = True
 
             # Replace any quantifier in the event formula
             if QuantifierFlag == "ANY":
@@ -400,6 +437,7 @@ def writeSpec(text, sensorList, regionList, robotPropList):
 
             # Formulas defining when the proposition is true and false
             EventFormula = parseToggle(EventProp,ToggleEvent,sensorList,allRobotProp,lineInd)
+            if EventFormula == '': failed = True
 
             # Replace any quantifier in the event formula
             if QuantifierFlag == "ANY":
@@ -428,6 +466,7 @@ def writeSpec(text, sensorList, regionList, robotPropList):
                 print 'ERROR(14): Could not parse the sentence in line '+ str(lineInd)+' :'
                 print line
                 print 'because could not parse liveness requirement'
+                failed = True
                 continue
                 
             # If not SysGoals, then it is an error
@@ -435,6 +474,7 @@ def writeSpec(text, sensorList, regionList, robotPropList):
                 print 'ERROR(15): Could not parse the sentence in line '+ str(lineInd)+' :'
                 print line
                 print 'because the requirement is not system liveness'
+                failed = True
                 continue
 
             # Add the liveness ('go to') to the spec
@@ -459,6 +499,7 @@ def writeSpec(text, sensorList, regionList, robotPropList):
 
             # parse the liveness requirement
             formulaInfo = parseLiveness(LivenessReq,sensorList,allRobotProp,lineInd)
+            if formulaInfo['formula'] == '': failed = True
 
             # Replace any quantifier in the requirement
             if QuantifierFlag == "ANY":
@@ -483,6 +524,7 @@ def writeSpec(text, sensorList, regionList, robotPropList):
 
             # parse the safety requirement
             formulaInfo = parseSafety(SafetyReq,sensorList,allRobotProp,lineInd)
+            if formulaInfo['formula'] == '': failed = True 
 
             # Replace any quantifier in the requirement
             if QuantifierFlag == "ANY":
@@ -490,6 +532,7 @@ def writeSpec(text, sensorList, regionList, robotPropList):
                 print line
                 print 'because the ANY quantifier is not currently supported in safety requirements'
                 print ''
+                failed = True
                 continue
             elif QuantifierFlag == "ALL":
                 for r in RegionGroups[quant_group]:
@@ -509,6 +552,7 @@ def writeSpec(text, sensorList, regionList, robotPropList):
             print line
             print 'because it is not in a known format'
             print ''
+            failed = True
 
         ## Resolve all the quantifiers
         #if QuantifierFlag is not None:
@@ -589,7 +633,7 @@ def writeSpec(text, sensorList, regionList, robotPropList):
         print 'They should be removed from the proposition lists\n'
     
 
-    return spec,linemap
+    return spec,linemap,failed
 
 
 def parseInit(sentence,PropList,lineInd):
