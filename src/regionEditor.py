@@ -171,9 +171,6 @@ class regionEditor(wx.Frame):
                                             # and dimensioning
                                             # Region creation: [Point(x0,y0), ...]
                                             # Dimensioning: (idxRegion, idxVert)
-        self.polySnaps = []                 # Keeps snap information for each
-                                            # new region creation point
-                                            # [(idxReg, idxPt, idxEdge), ...]
         
         # Mouse-related parameters
         self.leftClickPt = Point(0.0, 0.0)  # Location of last left downclick
@@ -289,6 +286,7 @@ class regionEditor(wx.Frame):
         self.ResetMapToggles(self.toggleDim)
     
     def OnButtonAutobound(self, event):  # wxGlade: regionEditor.<event_handler>
+        self.AddToUndo()
         self.Autoboundary()
         self.RedrawCanvas()
     
@@ -302,14 +300,19 @@ class regionEditor(wx.Frame):
     
     def OnButtonCal(self, event):  # wxGlade: regionEditor.<event_handler>
         self.ResetMapToggles()
+        self.AddToUndo()
         calibGUI = CalibrationFrame(self)
     
     def OnMenuNew(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuNew' not implemented"
-        event.Skip()
+        self.AddToUndo()
+        self.ResetMapToggles()
+        self.regions = []
+        self.adjacent = []
+        # TODO: Clear background image
+        self.RedrawCanvas()
     
     def OnMenuOpen(self, event):  # wxGlade: regionEditor.<event_handler>
-        # Start up save dialog
+        # Start up open dialog
         dialogOpen = wx.FileDialog(self, message="Open File", \
             defaultDir=sys.path[0], \
             defaultFile=self.fileName.split('\\').pop(), \
@@ -317,6 +320,7 @@ class regionEditor(wx.Frame):
         
         # Hit Open
         if dialogOpen.ShowModal() == wx.ID_OK:
+            self.AddToUndo()
             filePath = dialogOpen.GetPath()
             if not os.path.exists(filePath) or not ('.regions' in filePath):
                 return
@@ -460,40 +464,17 @@ class regionEditor(wx.Frame):
         # Note that this is not a redoable action by design
         if self.polyVerts:
             self.polyVerts = []
-            self.polySnaps = []
             self.RedrawCanvas()
         # Other undoable changes exist
         elif self.undoActions:
+            # Save current state to redo
+            newAction = Action(self.regions, self.adjacent)
+            self.redoActions.append(newAction)
+            
+            # Undo action
             action = self.undoActions.pop()
-            # Creation action
-            if not action.oldState:
-                # Single region creation
-                if isinstance(action.newState, Region):
-                    self.regions.remove(action.newState)
-                # Map load from blank canvas
-                if isinstance(action.newState, list):
-                    self.regions = []
-                # TODO: Background image load from blank
-            # Deletion action
-            if not action.newState:
-                # Single region deletion
-                if isinstance(action.oldState, Region):
-                    self.regions.append(action.oldState)
-                # Multiple region deletion or map clear
-                if isinstance(action.oldState, list):
-                    self.regions.extend(action.oldState)
-                # TODO: Background image clear
-            # Modification action
-            else:
-                # Single region modification
-                if isinstance(action.oldState, Region):
-                    idx = self.regions.index(action.newState)
-                    self.regions[idx] = action.oldState
-                # Map load from non-blank canvas
-                if isinstance(action.oldState, list):
-                    self.regions = action.oldState
-                # TODO: Background image load from other image
-            self.redoActions.append(action)
+            self.regions = action.stateRegions
+            self.adjacent = action.stateAdjacent
             # TODO: if not self.undoActions: disable self.menuUndo
             # TODO: enable self.menuRedo
             self.RedrawCanvas()
@@ -502,52 +483,30 @@ class regionEditor(wx.Frame):
         """Reapply most recently undone action."""
         # Redoable actions exist
         if self.redoActions:
+            # Save current state to undo
+            newAction = Action(self.regions, self.adjacent)
+            self.undoActions.append(newAction)
+            
+            # Redo action
             action = self.redoActions.pop()
-            # Creation action
-            if not action.oldState:
-                # Single region creation
-                if isinstance(action.newState, Region):
-                    self.regions.append(action.newState)
-                # Map load from blank canvas
-                if isinstance(action.newState, list):
-                    self.regions = action.newState
-                # TODO: Background image load from blank
-            # Deletion action
-            if not action.newState:
-                # Single region deletion
-                if isinstance(action.oldState, Region):
-                    self.regions.remove(action.oldState)
-                # Multiple region deletion or map clear
-                if isinstance(action.oldState, list):
-                    for reg in action.oldState:
-                        self.regions.remove(reg)
-                # TODO: Background image clear
-            # Modification action
-            else:
-                # Single region modification
-                if isinstance(action.oldState, Region):
-                    idx = self.regions.index(action.oldState)
-                    self.regions[idx] = action.newState
-                # Map load from non-blank canvas
-                if isinstance(action.oldState, list):
-                    self.regions = action.newState
-                # TODO: Background image load from other image
-            self.undoActions.append(action)
+            self.regions = action.stateRegions
+            self.adjacent = action.stateAdjacent
             # TODO: if not self.redoActions: disable self.menuRedo
             # TODO: enable self.menuUndo
             self.RedrawCanvas()
 
     def OnMenuAutobound(self, event):  # wxGlade: regionEditor.<event_handler>
+        self.AddToUndo()
         self.Autoboundary()
         self.RedrawCanvas()
 
     def OnMenuRect(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuRect' not implemented"
-        event.Skip()
+        self.toggleSquare.SetValue(True)
+        self.OnToggleSquare(None)
 
     def OnMenuPoly(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuPoly' not implemented"
-        event.Skip()
+        self.togglePoly.SetValue(True)
+        self.OnTogglePoly(None)
 
     def OnMenuAddPoint(self, event):  # wxGlade: regionEditor.<event_handler>
         print "Event handler `OnMenuAddPoint' not implemented"
@@ -562,8 +521,8 @@ class regionEditor(wx.Frame):
         event.Skip()
 
     def OnMenuMarkersClear(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuMarkersClear' not implemented"
-        event.Skip()
+        self.markerPoses = []
+        self.RedrawCanvas()
 
     def OnMenuCamera(self, event):  # wxGlade: regionEditor.<event_handler>
         print "Event handler `OnMenuCamera' not implemented"
@@ -600,49 +559,29 @@ class regionEditor(wx.Frame):
         elif self.toggleSquare.GetValue():
             # Making the second corner of rectangle
             if self.polyVerts and pt.Dist(self.polyVerts[0]) > self.tolerance:
-                # Snap vertices to regions as necessary, not to Vicon
-                # This may result in a non-square region, but may be preferable
-                x0 = self.polyVerts[0].x
-                y0 = self.polyVerts[0].y
-                pt1, iReg1, iPt1, iEd1, snapped1 = \
-                    self.SnapRegions(Point(x0, pt.y))
-                pt3, iReg3, iPt3, iEd3, snapped3 = \
-                    self.SnapRegions(Point(pt.x, y0))
-                # Move clicked points if other vertices snap and they don't
-                if snapped1:
-                    if iReg == -1:
-                        pt = Point(pt.x, pt1.y)
-                    if self.polySnaps[0][0] == -1:
-                        self.polyVerts[0] = Point(pt1.x, self.polyVerts[0].y)
-                if snapped3:
-                    if iReg == -1:
-                        pt = Point(pt3.x, pt.y)
-                    if self.polySnaps[0][0] == -1:
-                        self.polyVerts[0] = Point(self.polyVerts[0].x, pt3.y)
+                pt1 = Point(self.polyVerts[0].x, pt.y)
+                pt3 = Point(pt.x, self.polyVerts[0].y)
                 self.polyVerts.append(pt1)
                 self.polyVerts.append(pt)
                 self.polyVerts.append(pt3)
-                self.polySnaps.append((iReg1, iPt1, iEd1))
-                self.polySnaps.append((iReg, iPt, iEd))
-                self.polySnaps.append((iReg3, iPt3, iEd3))
                 # Create a square between previous click and new click
+                self.AddToUndo()
                 self.CreateRegion()
             # Making the first corner of rectangle
             else:
                 # Save point as first corner of square
                 self.polyVerts.append(pt)
-                self.polySnaps.append((iReg, iPt, iEd))
 
         # Creating a polygonal region
         elif self.togglePoly.GetValue():
             # Closing the polygon to create a region
             if self.polyVerts and len(self.polyVerts) > 2 and \
                     pt == self.polyVerts[0]:
+                self.AddToUndo()
                 self.CreateRegion()
             # New point distinct from others
             elif not pt in self.polyVerts:
                 self.polyVerts.append(pt)
-                self.polySnaps.append((iReg, iPt, iEd))
                 # Plot line between last two points
                 if len(self.polyVerts) > 1:
                     x1pix, y1pix = self.Map2Pix(self.polyVerts[-2])
@@ -673,7 +612,6 @@ class regionEditor(wx.Frame):
                     dimDlg.Destroy()
 
                     # Move second point along same line to specified distance
-                    oldRegion = copy.deepcopy(self.regions[iReg])
                     pt0 = self.regions[self.polyVerts[0]].verts[self.polyVerts[1]]
                     signx = 1.0
                     signy = 1.0
@@ -693,9 +631,8 @@ class regionEditor(wx.Frame):
                         dx = signx * (dim - pt.Dist(pt0)) / \
                             math.sqrt(1 + slope ** 2)
                         dy = slope * dx
-                    self.regions[iReg].verts[iPt] = \
-                        self.regions[iReg].verts[iPt] + Point(dx, dy)
-                    self.AddToUndo(Action(oldRegion, self.regions[iReg]))
+                    self.AddToUndo()
+                    self.regions[iReg].verts[iPt] += Point(dx, dy)
                     self.polyVerts = []
                     self.RecalcAdjacency(iReg)
                     self.RedrawCanvas()
@@ -710,6 +647,7 @@ class regionEditor(wx.Frame):
             # Dragging point(s)
             if iReg in self.selectedRegions and iPt != -1:
                 # Change point position and check adjacencies
+                self.AddToUndo()
                 self.regions[iReg].verts[iPt].Set(pt.x, pt.y)
                 self.RecalcAdjacency(iReg)
                 self.RedrawCanvas()
@@ -718,6 +656,7 @@ class regionEditor(wx.Frame):
             elif iReg in self.selectedRegions or \
                     iRegInner in self.selectedRegions:
                 # Change region(s) position and check adjacencies
+                self.AddToUndo()
                 delta = pt - self.leftClickPt
                 for iRegSel in self.selectedRegions:
                     for iPt in range(len(self.regions[iRegSel].verts)):
@@ -771,6 +710,7 @@ class regionEditor(wx.Frame):
         # Creating a polygonal region
         if self.togglePoly.GetValue() and self.polyVerts and \
                 len(self.polyVerts) > 2:
+            self.AddToUndo()
             self.CreateRegion()
         
         # Editing a region
@@ -819,6 +759,7 @@ class regionEditor(wx.Frame):
         if (keycode == wx.WXK_BACK or keycode == wx.WXK_DELETE) and \
                 self.selectedRegions and not self.togglePoly.GetValue() and \
                 not self.toggleSquare.GetValue():
+            self.AddToUndo()
             self.selectedRegions.sort()
             while self.selectedRegions:
                 self.DeleteRegion(self.selectedRegions.pop())
@@ -828,7 +769,6 @@ class regionEditor(wx.Frame):
                 self.polyVerts:
             if self.toggleSquare.GetValue() or self.togglePoly.GetValue():
                 self.polyVerts.pop()
-                self.polySnaps.pop()
                 self.RedrawCanvas()
             elif self.toggleDim.GetValue():
                 self.polyVerts = []
@@ -1127,7 +1067,6 @@ class regionEditor(wx.Frame):
         """
         # Reset region creation and clear temporary lines
         self.polyVerts = []
-        self.polySnaps = []
         self.RedrawCanvas()
 
         # Turn off all toggles and revert specified one
@@ -1152,15 +1091,11 @@ class regionEditor(wx.Frame):
         self.adjacent.append([[] for col in xrange(len(self.adjacent))])
         for row in self.adjacent:
             row.append([])
-        self.AddToUndo(Action(None, region))
-        # TODO: Change Undo setup so that adjacency matrix can be added with
-        #       regions in one undo step
         
         self.RecalcAdjacency(idxNewReg)
         
         # Cleanup and draw
         self.polyVerts = []
-        self.polySnaps = []
         self.polyAdjEdges = []
         self.DrawRegion(region)
         self.DrawAdjacencies(idxNewReg)
@@ -1178,21 +1113,16 @@ class regionEditor(wx.Frame):
         
         # Redraw regions
         self.RedrawCanvas()
-        
-        # TODO: Add to undo
 
     def AddPointToRegion(self, pt, iReg, iEdge):
         """Add a vertex to the region.
         
         pt - Point object, location of new vertex in map coordinates
-             Unless this is a new Point object, it is recommended that this be
-             a copy of the previous Point object
-             AddPointToRegion(copy.copy(pt), iReg, iEdge)
         iRegion - Int, index of region to modify
         iEdge - Int, index of the edge to replace with edges to and from pt
         """
         # Add point to other region
-        self.regions[iReg].verts.insert(iEdge + 1, pt)
+        self.regions[iReg].verts.insert(iEdge + 1, copy.copy(pt))
         # Update all transition edges
         # Loop through all regions
         for jReg in range(len(self.adjacent[iReg])):
@@ -1246,6 +1176,7 @@ class regionEditor(wx.Frame):
             elif regEdDia.textName.GetValue() == reg.name or \
                     regEdDia.textName.GetValue() not in \
                     [r.name for r in self.regions]:
+                self.AddToUndo()
                 reg.name = regEdDia.textName.GetValue()
                 reg.color = regEdDia.colorPicker.GetColour()
                 reg.isObstacle = regEdDia.chkbxObst.GetValue()
@@ -1259,7 +1190,6 @@ class regionEditor(wx.Frame):
         
         # Redraw the regions to ensure correct name/color
         self.RedrawCanvas()
-        # TODO: Add to undo
     
     def RecalcAdjacency(self, iReg, iRegStart=0):
         """Recalculate the adjacent walls between the specified region and
@@ -1316,7 +1246,7 @@ class regionEditor(wx.Frame):
                 # Other region vertex snapped to wall of new region
                 if iEd != -1:
                     # Add point to new region and update old transitions
-                    self.AddPointToRegion(copy.copy(pt), iReg, iEd)
+                    self.AddPointToRegion(pt, iReg, iEd)
                     vertsColloc.append([])
                     # Don't bother tracking point connectivity here
                     # Recheck it in next loop so we can look at all regions
@@ -1338,7 +1268,7 @@ class regionEditor(wx.Frame):
                     vertsColloc[iPt].append((iOthReg, iOthPt))
                 # Snapped to an edge of the other region
                 elif iOthEd != -1:
-                    self.AddPointToRegion(copy.copy(pt), iOthReg, iOthEd)
+                    self.AddPointToRegion(pt, iOthReg, iOthEd)
                     vertsColloc[iPt].append((iOthReg, iOthEd + 1))
         
         # Now look for adjacent edges and update transition matrix accordingly
@@ -1411,13 +1341,12 @@ class regionEditor(wx.Frame):
         else:
             return None
 
-    def AddToUndo(self, action):
-        """Add specified action to the undo queue.
-
-        action - Action object to be added
-        """
+    def AddToUndo(self):
+        """Add current state to the undo queue."""
         # Note that this is only called when doing a new action,
         # not when redoing since this clears the redo buffer
+        action = Action(self.regions, self.adjacent)
+        print action.stateRegions, action.stateAdjacent
         self.undoActions.append(action)
         while len(self.undoActions) > self.unredoBufLen:
             self.undoActions.popleft()
@@ -2749,17 +2678,15 @@ class Region:
 
 
 class Action:
-    def __init__(self, oldState, newState):
+    def __init__(self, regions, adjacent):
         """Create an object that represents an (un/re)doable action.
-
-        oldState - Previous state of the affected object(s)
-        newState - Changed state of the affected object(s)
-
-        These arguments will usually be one or more regions that were changed.
-        An argument of "None" indicates either creation or deletion.
+        Deep copies are used to avoid retaining same state when state changes.
+        
+        regions - Regions array before the action was taken.
+        adjacent - Adjacencies matrix before the action was taken.
         """
-        self.oldState = oldState
-        self.newState = newState
+        self.stateRegions = copy.deepcopy(regions)
+        self.stateAdjacent = copy.deepcopy(adjacent)
 # end of class Action
 
 
