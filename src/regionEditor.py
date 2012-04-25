@@ -18,6 +18,8 @@ import re
 import winsound
 import pyttsx
 import lib.fileMethods as fileMethods
+import json
+from lib.regions import prettierJSONEncoder
 import lib._transformations as _transformations
 
 # begin wxGlade: extracode
@@ -337,22 +339,11 @@ class regionEditor(wx.Frame):
             #    self.bkgndImage = None
             
             # Set all region information from lines in file
-            # Each region line format is this:
-            #   Name {ColorR ColorG ColorB} [(x1 y1) (x2 y2) ...]
-            for rData in data["Regions"]:
-                rData = re.sub('[\[\]\(\)\{\}]', '', rData)
-                rData = rData.split()       # Separates on any whitespace
-                rName = rData[0]
-                rRGB = []
-                for i in range(1, 4):       # Convert colors to integers
-                    rRGB.append(int(rData[i]))
-                rVerts = []
-                for i in range(4, len(rData), 2):
-                    x = float(rData[i])
-                    y = float(rData[i+1])
-                    rVerts.append(Point(x, y))
-                region = Region(rVerts, rName, rgb=rRGB)
-                self.regions.append(region)
+            rdata = json.loads("\n".join(data["Regions"]))
+            for rd in rdata:
+                newRegion = Region()
+                newRegion.setData(rd)
+                self.regions.append(newRegion)
 
             # Make an empty adjacency matrix of size (nRegions) x (nRegions)
             self.adjacent = [[[] for j in range(len(self.regions))] \
@@ -364,21 +355,21 @@ class regionEditor(wx.Frame):
             for tData in data["Transitions"]:
                 tData = re.sub('[\[\]\(\)]', '', tData)
                 tData = tData.split();      # Separate on any whitespace
-                iReg1 = int(tData[0])
-                iReg2 = int(tData[1])
-                faces = []
+                iReg1 = self.indexOfRegionWithName(tData[0])
+                iReg2 = self.indexOfRegionWithName(tData[1])
                 # All transitions between regions
                 for i in range(2, len(transData), 2):
                     iFaceReg1 = int(tData[i])
                     iFaceReg2 = int(tData[i+1])
                     self.adjacent[iReg1][iReg2].append((iFaceReg1, iFaceReg2))
-                    # Note that region file specifies transitions in both directions
-                    # So mirroring here is unnecessary
+                    # Don't assume bidirectional transitions
+                    # Region file will specify both directions if bidirectional
                     
             # Set "obstacleness" of regions
             if "Obstacles" in data:
-                for iReg in data["Obstacles"]:
-                    self.regions[iReg].isObstacle = True
+                for regName in data["Obstacles"]:
+                    self.regions[self.indexOfRegionWithName( \
+                        regName)].isObstacle = True
             
             # Store the filename for saving
             self.fileName = filePath
@@ -390,6 +381,7 @@ class regionEditor(wx.Frame):
     
     def OnMenuSave(self, event):  # wxGlade: regionEditor.<event_handler>
         """Save to file that has already been used."""
+        # Filename known
         if self.fileName:
             # Bring up dialog box to ask about boundary if necessary
             if self.regions and not self.ExistBoundary():
@@ -402,35 +394,49 @@ class regionEditor(wx.Frame):
                 elif boundDiaResult == wx.ID_CANCEL:
                     return
             
-            # Save file
-            f = open(self.fileName, 'w')
-            f.write("# This is a region definition file for the LTLMoP " + \
-                "toolkit.\n# Format details are described at the " + \
-                "beginning of each section below.\n# Note that all values " + \
-                "are separated by *whitespace*.\n\nBackground: # Relative " + \
-                "path of background image file\n")
-            f.write("None\n\n")     # TODO: Support for background images
-            f.write("Obstacles: # Indices of regions to treat as obstacles\n")
-            f.write("\n\n")         # TODO: Support for obstacles
-            f.write("Regions: # Name {ColorR ColorG ColorB} " + \
-                "[(x1 y1) (x2 y2) ...]\n")
-            for reg in self.regions:
-                f.write(str(reg) + "\n")
-            f.write("\n")
-            f.write("Transitions: # Region1Idx Region2Idx " + \
-                "[(Reg1FaceIdx1 Reg2FaceIdx1) (Reg1FaceIdx2 Reg2FaceIdx2) " + \
-                "...]\n")
-            for iAdj in range(len(self.adjacent)):
-                for jAdj, adjList in enumerate(self.adjacent[iAdj]):
-                    if iAdj != jAdj and adjList:
-                        line = "%d\t%d\t[" % (iAdj, jAdj)
-                        for kAdj, adj in enumerate(adjList):
-                            line += "(%d\t%d)" % adj
-                            if kAdj < len(adjList) - 1:
-                                line += "\t"
-                        line += "]\n"
-                        f.write(line)
-            f.close()
+            comments = {"FILE_HEADER":"This is a region definition file for " +
+                                      "the LTLMoP toolkit.\nFormat details " +
+                                      "are described at the beginning of " +
+                                      "each section below.\n",
+                        "Background": "Relative path of background image file",
+                        "Regions": "Stored as JSON string",
+                        "Transitions": "reg1name reg2name " + 
+                                       "[(reg1face1idx reg2face1idx) " +
+                                       "(reg1face2idx reg2face2idx) ...]",
+                        "Obstacles": "Names of regions to treat as obstacles"}
+            
+            regionData = []
+            for r in self.regions:
+                d = r.getData()
+                # Don't store the following attribute inside the regions
+                del d['isObstacle']
+                regionData.append(d)
+            je = prettierJSONEncoder(indent=4)
+            regionData = [je.encode(regionData)]
+            
+            transitionData = []
+            for iReg1, destinations in enumerate(self.adjacent):
+                # Note: Don't assume bi-directional transitions
+                for iReg2, faces in enumerate(destinations):
+                    if faces == []: continue    # No transitions so skip
+                    
+                    singleTrans = self.regions[iReg1].name + "\t" + \
+                        self.regions[iReg2].name + "\t["
+                    for face in faces:
+                        singleTrans += "(" + str(face[0]) + "\t" + \
+                            str(face[1]) + ")"
+                    transitionData.append(singleTrans)
+            
+            obstacleRegions = [r.name for r in self.regions if r.isObstacle]
+            
+            # TODO: Get background image in here
+            data = {"Regions": regionData,
+                    "Transitions": transitionData,
+                    "Obstacles": obstacleRegions}
+
+            fileMethods.writeToFile(self.fileName, data, comments)
+        
+        # No known filename
         else:
             self.OnMenuSaveAs(None)
     
@@ -1353,6 +1359,13 @@ class regionEditor(wx.Frame):
                 elif (iOthReg, jOthPt2) in vertsColloc[jPt]:
                     self.adjacent[iReg][iOthReg].append((iPt, iOthPt))
                     self.adjacent[iOthReg][iReg].append((iOthPt, iPt))
+    
+    def IndexOfRegionWithName(self, name):
+        for i, region in enumerate(self.regions):
+            if region.name.lower() == name.lower():
+                return i
+        print 'WARNING: Region "' + name + '" not found.'
+        return -1
     
     def ExistBoundary(self):
         """Check if a boundary region has been defined."""
@@ -2626,23 +2639,26 @@ class CalibrationFrame(wx.Frame):
 # end of class CalibrationFrame
 
 class Region:
-    def __init__(self, points, name, rgb=None):
+    def __init__(self, points=[], name="", holes=[], rgb=None, obst=False):
         """Create an object to represent a region.
 
         points - List of Points containing vertex information
                  [Point(x1, y1), Point(x2, y2), ...]
         name - String defining region name
+        holes - List of lists of points representing holes cut in the region
         rgb - List of integers defining color
               [red, green, blue], each with value in range [0 255]
+        obst - Boolean, True indicates that the region is an obstacle
         """
         # TODO: Add convex/concave
         self.verts = points
         self.name = name
+        self.holeList = holes
         if not rgb:
             rgb = [random.randint(0, 255), random.randint(0, 255), \
                 random.randint(0,255)]
         self.color = wx.Colour(rgb[0], rgb[1], rgb[2])
-        self.isObstacle = False
+        self.isObstacle = obst
     
     def __str__(self):
         """Representation of object."""
@@ -2654,6 +2670,44 @@ class Region:
                 s += "\t"
         s += "]"
         return s
+    
+    def getData(self):
+        """Return a copy of the object's internal data.
+        This is used to save this region to disk.
+        """
+
+        data = {'name': self.name, 'color': (self.color.Red(), \
+            self.color.Green(), self.color.Blue())}
+        
+        data['points'] = [(pt.x, pt.y) for pt in self.verts]
+        
+        data['holeList'] = []
+        for hole in self.holeList:
+            data['holeList'].append([(pt.x, pt.y) for pt in hole])
+
+        data['isObstacle'] = self.isObstacle
+
+        return data
+
+    def setData(self, data):
+        """Set the object's internal data.
+        
+        'data' is a copy of the object's saved data, as returned by
+        getData() above. This is used to restore a previously saved region.
+        """
+        
+        self.name = data['name']
+        self.color = wx.Colour(*data['color'])
+        
+        self.verts = [Point(*pt) for pt in data['points']]
+        
+        if 'holeList' in data:
+            self.holeList = []
+            for hole in data['holeList']:
+                self.holeList.append([Point(*pt) for pt in hole])
+        
+        if 'isObstacle' in data:
+            self.isObstacle = data['isObstacle']
     
     def PtInRegion(self, pt):
         """Check if a point is inside of the region.
