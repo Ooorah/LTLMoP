@@ -785,7 +785,6 @@ class regionEditor(wx.Frame):
             self.selectedRegions = []
             self.selectedRegions.append(iReg)
             self.EditRegion(iReg)
-            
     
     def OnMouseRightDown(self, event):
         """Save the right click point so it can be used later."""
@@ -1573,7 +1572,7 @@ class regionEditor(wx.Frame):
                 snapped = True
                 idxREdge = j - 1
         
-        return pt, idxRPoint, idxREdge, snapped
+        return copy.copy(pt), idxRPoint, idxREdge, snapped
     
     def SnapPoly(self, pt, snapped=False):
         """Snap the point to any vertex in the currently being created region
@@ -1600,7 +1599,7 @@ class regionEditor(wx.Frame):
                 snapped = True
             i += 1
 
-        return pt, idxPoint, snapped
+        return copy.copy(pt), idxPoint, snapped
 
     def SnapVicon(self, pt, snapped):
         """Snap the point to any saved Vicon marker position if it is
@@ -1627,7 +1626,7 @@ class regionEditor(wx.Frame):
                 snapped = True
             i += 1
 
-        return pt, idxMarker, snapped
+        return copy.copy(pt), idxMarker, snapped
     
     def InsideRegions(self, pt):
         """Find region containing point. Looks through regions on top first
@@ -1893,6 +1892,8 @@ class CalibrationFrame(wx.Frame):
         self.textEnterPointY = wx.TextCtrl(self.sidebar, -1, "")
         self.buttonEnterPoint = wx.Button(self.sidebar, wx.ID_OK, "OK")
         self.toggleDimen = wx.ToggleButton(self.sidebar, -1, "Dimen.")
+        self.buttonSave = wx.Button(self.sidebar, -1, "Save")
+        self.chkbxShear = wx.CheckBox(self.sidebar, -1, "Lock aspect ratio")
         self.map = wx.Panel(self, -1, style=wx.SUNKEN_BORDER | wx.TAB_TRAVERSAL)
         self.ref = wx.Panel(self, -1, style=wx.SUNKEN_BORDER | wx.TAB_TRAVERSAL)
 
@@ -1919,6 +1920,7 @@ class CalibrationFrame(wx.Frame):
         self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleDeletePoint, self.toggleDeletePoint)
         self.Bind(wx.EVT_BUTTON, self.OnButtonEnterPoint, id=wx.ID_OK)
         self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleDimen, self.toggleDimen)
+        self.Bind(wx.EVT_BUTTON, self.OnButtonSave, self.buttonSave)
         # end wxGlade
         
         # Check that regionEditor object was passed in correctly
@@ -2021,7 +2023,9 @@ class CalibrationFrame(wx.Frame):
         self.textEnterPointY.SetToolTipString("y")
         self.buttonEnterPoint.SetMinSize((25, 25))
         self.toggleDimen.SetMinSize((50, 50))
-        self.sidebar.SetMinSize((110, 245))
+        self.buttonSave.SetMinSize((50, 50))
+        self.chkbxShear.SetValue(1)
+        self.sidebar.SetMinSize((110, 268))
         self.map.SetMinSize((600, 300))
         self.map.SetBackgroundColour(wx.Colour(255, 255, 255))
         self.ref.SetMinSize((600, 300))
@@ -2033,6 +2037,7 @@ class CalibrationFrame(wx.Frame):
         sizer_6 = wx.BoxSizer(wx.HORIZONTAL)
         sizer_7 = wx.BoxSizer(wx.VERTICAL)
         sizer_8 = wx.BoxSizer(wx.VERTICAL)
+        sizer_12 = wx.BoxSizer(wx.HORIZONTAL)
         sizer_11 = wx.BoxSizer(wx.HORIZONTAL)
         sizer_10 = wx.BoxSizer(wx.HORIZONTAL)
         sizer_9 = wx.BoxSizer(wx.HORIZONTAL)
@@ -2046,7 +2051,10 @@ class CalibrationFrame(wx.Frame):
         sizer_11.Add(self.textEnterPointY, 0, wx.ALIGN_CENTER_VERTICAL, 0)
         sizer_11.Add(self.buttonEnterPoint, 0, wx.ALIGN_RIGHT | wx.ALIGN_CENTER_VERTICAL, 0)
         sizer_8.Add(sizer_11, 1, wx.TOP | wx.BOTTOM | wx.EXPAND, 5)
-        sizer_8.Add(self.toggleDimen, 0, wx.TOP | wx.BOTTOM | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_12.Add(self.toggleDimen, 0, wx.RIGHT | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_12.Add(self.buttonSave, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
+        sizer_8.Add(sizer_12, 1, wx.EXPAND, 0)
+        sizer_8.Add(self.chkbxShear, 0, wx.TOP | wx.BOTTOM | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
         self.sidebar.SetSizer(sizer_8)
         sizer_6.Add(self.sidebar, 0, 0, 0)
         sizer_7.Add(self.map, 1, wx.BOTTOM | wx.EXPAND, 3)
@@ -2093,9 +2101,15 @@ class CalibrationFrame(wx.Frame):
             regPts = numpy.hstack([regPts, \
                 numpy.mat([ptPair[1].x, ptPair[1].y]).T])
         
+        # Shearing allows for the scaling of dimensions independently
+        # (does not keep the aspect ratio) but also skews angles and such
+        # if the points chosen are not perfect
+        allowShear = not self.chkbxShear.IsChecked()
+        
         # Get tranformation matrix such that
         # regPt = T * mapPt
-        T = _transformations.affine_matrix_from_points(mapPts, regPts)
+        T = _transformations.affine_matrix_from_points(mapPts, regPts, \
+            shear=allowShear)
         
         # Apply transformation to all region points
         # TODO: Add this to undo in regionEditor somehow
@@ -2199,6 +2213,9 @@ class CalibrationFrame(wx.Frame):
     def OnToggleDimen(self, event):  # wxGlade: CalibrationFrame.<event_handler>
         print "Event handler `OnToggleDimen' not implemented"
         event.Skip()
+    
+    def OnButtonSave(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        self.OnMenuSave(None)
     
     def OnMapMouseLeftDown(self, event):
         """Save downclick point on map for future use."""
@@ -2570,7 +2587,7 @@ class CalibrationFrame(wx.Frame):
                 snapped = True
             iCPt -= 1
         
-        return pt, idxCalibPt, snapped
+        return copy.copy(pt), idxCalibPt, snapped
     
     def SnapVicon(self, pt, snapped=False):
         """Snap the given point to any sufficiently close marker point.
@@ -2587,11 +2604,11 @@ class CalibrationFrame(wx.Frame):
         iVPt = 0
         while not snapped and iVPt < len(self.markerPoses):
             if pt.Dist(self.markerPoses[iVPt]) < self.refTolerance:
-                pt = self.markerPoses[iVPt]
+                pt = copy.copy(self.markerPoses[iVPt])
                 snapped = True
             iVPt += 1
         
-        return pt, snapped
+        return copy.copy(pt), snapped
     
     def MapM2Pix(self, pose):
         """Convert from absolute (meter) coordinates to pixel coordinates for
