@@ -10,17 +10,16 @@ import math
 import numpy
 import wx
 import threading
-import socket
-import struct
 import copy
-import random
 import re
 import winsound
 import pyttsx
 import lib.fileMethods as fileMethods
+import lib.vicon as vicon
+import lib.calibrate as calibrate
+from lib.regionsPoints import Region, Point
 import json
 from lib.regions import prettierJSONEncoder
-import lib._transformations as _transformations
 
 # begin wxGlade: extracode
 # end wxGlade
@@ -42,6 +41,7 @@ class regionEditor(wx.Frame):
         self.filemenu.AppendItem(self.menuSave)
         self.menuSaveAs = wx.MenuItem(self.filemenu, wx.NewId(), "Save As", "", wx.ITEM_NORMAL)
         self.filemenu.AppendItem(self.menuSaveAs)
+        self.filemenu.AppendSeparator()
         self.menuExit = wx.MenuItem(self.filemenu, wx.NewId(), "Exit", "", wx.ITEM_NORMAL)
         self.filemenu.AppendItem(self.menuExit)
         self.RegionEditor_menubar.Append(self.filemenu, "File")
@@ -58,23 +58,29 @@ class regionEditor(wx.Frame):
         self.menuDrawing.AppendItem(self.menuRect)
         self.menuPoly = wx.MenuItem(self.menuDrawing, wx.NewId(), "Polygon", "", wx.ITEM_NORMAL)
         self.menuDrawing.AppendItem(self.menuPoly)
+        self.menuDrawing.AppendSeparator()
         self.menuAddPoint = wx.MenuItem(self.menuDrawing, wx.NewId(), "Add Point", "", wx.ITEM_NORMAL)
         self.menuDrawing.AppendItem(self.menuAddPoint)
         self.menuRemPoint = wx.MenuItem(self.menuDrawing, wx.NewId(), "Remove Point", "", wx.ITEM_NORMAL)
         self.menuDrawing.AppendItem(self.menuRemPoint)
         self.RegionEditor_menubar.Append(self.menuDrawing, "Drawing")
         self.menuView = wx.Menu()
-        self.menuMarkers = wx.MenuItem(self.menuView, wx.NewId(), "Markers", "", wx.ITEM_CHECK)
+        self.menuMarkers = wx.MenuItem(self.menuView, wx.NewId(), "Stream Markers", "", wx.ITEM_CHECK)
         self.menuView.AppendItem(self.menuMarkers)
         self.menuMarkersClear = wx.MenuItem(self.menuView, wx.NewId(), "Clear Markers", "", wx.ITEM_NORMAL)
         self.menuView.AppendItem(self.menuMarkersClear)
-        self.menuCamera = wx.MenuItem(self.menuView, wx.NewId(), "Camera Capture", "", wx.ITEM_NORMAL)
-        self.menuView.AppendItem(self.menuCamera)
+        self.menuView.AppendSeparator()
         self.menuImageImport = wx.MenuItem(self.menuView, wx.NewId(), "Import Background Image", "", wx.ITEM_NORMAL)
         self.menuView.AppendItem(self.menuImageImport)
         self.menuImageClear = wx.MenuItem(self.menuView, wx.NewId(), "Clear Background Image", "", wx.ITEM_NORMAL)
         self.menuView.AppendItem(self.menuImageClear)
-        self.RegionEditor_menubar.Append(self.menuView, "View")
+        self.menuView.AppendSeparator()
+        self.menuFeedback = wx.MenuItem(self.menuView, wx.NewId(), "Audio Feedback", "", wx.ITEM_CHECK)
+        self.menuView.AppendItem(self.menuFeedback)
+        self.menuView.AppendSeparator()
+        self.menuCalibrate = wx.MenuItem(self.menuView, wx.NewId(), "Calibrate", "", wx.ITEM_NORMAL)
+        self.menuView.AppendItem(self.menuCalibrate)
+        self.RegionEditor_menubar.Append(self.menuView, "Tools")
         self.helpmenu = wx.Menu()
         self.menuAbout = wx.MenuItem(self.helpmenu, wx.NewId(), "About", "", wx.ITEM_NORMAL)
         self.helpmenu.AppendItem(self.menuAbout)
@@ -82,8 +88,8 @@ class regionEditor(wx.Frame):
         self.SetMenuBar(self.RegionEditor_menubar)
         # Menu Bar end
         self.sidebar = wx.Panel(self, -1)
-        self.toggleVicon = wx.ToggleButton(self.sidebar, -1, "Vicon")
-        self.buttonCamera = wx.Button(self.sidebar, -1, "Camera")
+        self.toggleVicon = wx.ToggleButton(self.sidebar, -1, "Markers")
+        self.buttonImage = wx.Button(self.sidebar, -1, "Image")
         self.toggleSquare = wx.ToggleButton(self.sidebar, -1, "Rect.")
         self.togglePoly = wx.ToggleButton(self.sidebar, -1, "Polygon")
         self.toggleDim = wx.ToggleButton(self.sidebar, -1, "Length")
@@ -109,12 +115,11 @@ class regionEditor(wx.Frame):
         self.Bind(wx.EVT_MENU, self.OnMenuRemPoint, self.menuRemPoint)
         self.Bind(wx.EVT_MENU, self.OnMenuMarkers, self.menuMarkers)
         self.Bind(wx.EVT_MENU, self.OnMenuMarkersClear, self.menuMarkersClear)
-        self.Bind(wx.EVT_MENU, self.OnMenuCamera, self.menuCamera)
         self.Bind(wx.EVT_MENU, self.OnMenuImageImport, self.menuImageImport)
         self.Bind(wx.EVT_MENU, self.OnMenuImageClear, self.menuImageClear)
         self.Bind(wx.EVT_MENU, self.OnMenuAbout, self.menuAbout)
         self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleVicon, self.toggleVicon)
-        self.Bind(wx.EVT_BUTTON, self.OnButtonCamera, self.buttonCamera)
+        self.Bind(wx.EVT_BUTTON, self.OnButtonImage, self.buttonImage)
         self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleSquare, self.toggleSquare)
         self.Bind(wx.EVT_TOGGLEBUTTON, self.OnTogglePoly, self.togglePoly)
         self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleDim, self.toggleDim)
@@ -123,9 +128,9 @@ class regionEditor(wx.Frame):
         self.Bind(wx.EVT_BUTTON, self.OnButtonCal, self.buttonCal)
         # end wxGlade
         
-        # Handle input
+        # Handle input that should be the regions file name to load
         if len(args) > 2 and isinstance(args[2], str):
-            self.fileName = os.path.join(os.getcwd(), args[2])
+            self.fileName = args[2]             # Full path to regions file
         else:
             self.fileName = ""
         
@@ -138,6 +143,7 @@ class regionEditor(wx.Frame):
         self.canvas.Bind(wx.EVT_MOUSEWHEEL, self.OnMouseWheel, self.canvas)
         self.canvas.Bind(wx.EVT_ENTER_WINDOW, self.OnEnterWindow, self.canvas)
         self.canvas.Bind(wx.EVT_LEAVE_WINDOW, self.OnLeaveWindow, self.canvas)
+        self.canvas.Bind(wx.EVT_MOTION, self.OnMouseMotion, self.canvas)
         
         # Bind keyboard events
         self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown, self)
@@ -156,6 +162,10 @@ class regionEditor(wx.Frame):
         self.canvasScale = Point(xScale, yScale)
         self.canvasOffset = Point(xOffset, yOffset)
         
+        # Canvas display bitmap to speed up drawing
+        self.canvasBitmap = wx.EmptyBitmap(self.canvas.GetSize().GetWidth(), \
+            self.canvas.GetSize().GetHeight())
+        
         # Region-related parameters
         self.regions = []                   # List of regions in the map
         self.adjacent = []                  # List of lists holding transition
@@ -171,6 +181,15 @@ class regionEditor(wx.Frame):
                                             # and dimensioning
                                             # Region creation: [Point(x0,y0), ...]
                                             # Dimensioning: (idxRegion, idxVert)
+        
+        # Background-related parameters
+        self.backgroundImage = None         # Background image data
+        self.backgroundFile = ""            # Relative file path to the
+                                            # background image
+        self.backgroundPosition = None      # Position of left top corner and
+                                            # dimensions of the background
+                                            # image in absolute coordinates
+                                            # [x, y, width, height]
         
         # Mouse-related parameters
         self.leftClickPt = Point(0.0, 0.0)  # Location of last left downclick
@@ -193,13 +212,17 @@ class regionEditor(wx.Frame):
         
         # Create Vicon listener
         self.markerPoses = []   # Marker positions to be drawn
-        self.viconListener = ViconMarkerListener(self)
+        self.viconListener = vicon.ViconMarkerListener(self)
         self.dlgFeedback = None
+        self.feedbackPoses = [] # Points to be drawn to give feedback for
+                                # map building
         
         # Add close event handler to cleanup and possibly save before closing
         self.Bind(wx.EVT_CLOSE, self.OnClose)
         
         # Display the GUI window and set up the map canvas
+        if self.fileName:
+            self.ReadFile(self.fileName)
         self.Show()
         self.DrawGrid()
     
@@ -207,7 +230,7 @@ class regionEditor(wx.Frame):
         # begin wxGlade: regionEditor.__set_properties
         self.SetTitle("Region Editor")
         self.toggleVicon.SetMinSize((50, 50))
-        self.buttonCamera.SetMinSize((50, 50))
+        self.buttonImage.SetMinSize((50, 50))
         self.toggleSquare.SetMinSize((50, 50))
         self.togglePoly.SetMinSize((50, 50))
         self.toggleDim.SetMinSize((50, 50))
@@ -224,7 +247,7 @@ class regionEditor(wx.Frame):
         sizer_1 = wx.BoxSizer(wx.HORIZONTAL)
         grid_sizer_1 = wx.GridSizer(4, 2, 5, 5)
         grid_sizer_1.Add(self.toggleVicon, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        grid_sizer_1.Add(self.buttonCamera, 1, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
+        grid_sizer_1.Add(self.buttonImage, 1, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
         grid_sizer_1.Add(self.toggleSquare, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
         grid_sizer_1.Add(self.togglePoly, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
         grid_sizer_1.Add(self.toggleDim, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
@@ -269,12 +292,10 @@ class regionEditor(wx.Frame):
         else:
             self.viconListener.stop()
             # Reinitialize thread to enable restarting it
-            self.viconListener = ViconMarkerListener(self)
+            self.viconListener = vicon.ViconMarkerListener(self)
     
-    def OnButtonCamera(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Camera not yet implemented"
-        # TODO
-        event.Skip()
+    def OnButtonImage(self, event):  # wxGlade: regionEditor.<event_handler>
+        self.OnMenuImageImport(None)
     
     def OnToggleSquare(self, event):  # wxGlade: regionEditor.<event_handler>
         self.ResetMapToggles(self.toggleSquare)
@@ -301,14 +322,16 @@ class regionEditor(wx.Frame):
     def OnButtonCal(self, event):  # wxGlade: regionEditor.<event_handler>
         self.ResetMapToggles()
         self.AddToUndo()
-        calibGUI = CalibrationFrame(self)
+        calibGUI = calibrate.CalibrationFrame(self)
     
     def OnMenuNew(self, event):  # wxGlade: regionEditor.<event_handler>
         self.AddToUndo()
         self.ResetMapToggles()
         self.regions = []
         self.adjacent = []
-        # TODO: Clear background image
+        self.backgroundImage = None
+        self.backgroundFile = ""
+        self.backgroundPosition = None
         self.RedrawCanvas()
     
     def OnMenuOpen(self, event):  # wxGlade: regionEditor.<event_handler>
@@ -325,61 +348,16 @@ class regionEditor(wx.Frame):
             if not os.path.exists(filePath) or not ('.regions' in filePath):
                 return
             
-            # Pull all data from file into dictionary for parsing
-            data = fileMethods.readFromFile(filePath)
-            
-            if data is None:
-                return
-            
-            # Clear all current information
-            self.regions = []
-            self.adjacent = []
-            # self.bkgndImage = None
-            
-            # TODO: Uncomment when background image is included
-            #try:
-            #    self.bkgndImage = data["Background"][0]
-            #except KeyError:
-            #    self.bkgndImage = None
-            
-            # Set all region information from lines in file
-            rdata = json.loads("\n".join(data["Regions"]))
-            for rd in rdata:
-                newRegion = Region()
-                newRegion.setData(rd)
-                self.regions.append(newRegion)
-
-            # Make an empty adjacency matrix of size (nRegions) x (nRegions)
-            self.adjacent = [[[] for j in range(len(self.regions))] \
-                for i in range(len(self.regions))]
-            
-            # Assign region transitions
-            # Each transition line format is this:
-            # Region1Idx Region2Idx [(Reg1FaceIdx1 Reg2FaceIdx1) (Reg1FaceIdx2 Reg2FaceIdx2) ...]
-            for tData in data["Transitions"]:
-                tData = re.sub('[\[\]\(\)]', '', tData)
-                tData = tData.split();      # Separate on any whitespace
-                iReg1 = self.indexOfRegionWithName(tData[0])
-                iReg2 = self.indexOfRegionWithName(tData[1])
-                # All transitions between regions
-                for i in range(2, len(transData), 2):
-                    iFaceReg1 = int(tData[i])
-                    iFaceReg2 = int(tData[i+1])
-                    self.adjacent[iReg1][iReg2].append((iFaceReg1, iFaceReg2))
-                    # Don't assume bidirectional transitions
-                    # Region file will specify both directions if bidirectional
-                    
-            # Set "obstacleness" of regions
-            if "Obstacles" in data:
-                for regName in data["Obstacles"]:
-                    self.regions[self.indexOfRegionWithName( \
-                        regName)].isObstacle = True
-            
             # Store the filename for saving
             self.fileName = filePath
+            self.ReadFile(self.fileName)
+            self.isSaved = True
+            
+            # Set double click flag in case file was selected that way
+            self.justDoubleClicked = True
         
-        # TODO: Rescale/pan map to bring full map into view
-        self.RedrawCanvas()
+            # TODO: Rescale/pan map to bring full map into view
+            self.RedrawCanvas()
         
         dialogOpen.Destroy()
     
@@ -433,12 +411,15 @@ class regionEditor(wx.Frame):
             
             obstacleRegions = [r.name for r in self.regions if r.isObstacle]
             
-            # TODO: Get background image in here
-            data = {"Regions": regionData,
+            backgroundData = [self.backgroundFile] + self.backgroundPosition
+            
+            data = {"Background": backgroundData,
+                    "Regions": regionData,
                     "Transitions": transitionData,
                     "Obstacles": obstacleRegions}
 
             fileMethods.writeToFile(self.fileName, data, comments)
+            self.isSaved = True
         
         # No known filename
         else:
@@ -524,17 +505,32 @@ class regionEditor(wx.Frame):
         self.markerPoses = []
         self.RedrawCanvas()
 
-    def OnMenuCamera(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuCamera' not implemented"
-        event.Skip()
-
     def OnMenuImageImport(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuImageImport' not implemented"
-        event.Skip()
+        # Start up open dialog
+        dialogOpen = wx.FileDialog(self, message="Import Background Image", \
+            defaultDir=os.getcwd(), \
+            defaultFile=os.path.basename(self.fileName), \
+            style=wx.FD_OPEN)
+        
+        # Hit Open
+        if dialogOpen.ShowModal() == wx.ID_OK:
+            filePath = dialogOpen.GetPath()
+            if not os.path.exists(filePath):
+                return
+            
+            # Load image
+            self.LoadBackgroundImage(filePath)
+            self.isSaved = False
+            
+            # Set double click flag in case image was selected that way
+            self.justDoubleClicked = True
 
     def OnMenuImageClear(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuImageClear' not implemented"
-        event.Skip()
+        """Erase the background image."""
+        self.backgroundImage = None
+        self.backgroundFile = ""
+        self.backgroundPosition = None
+        self.RedrawCanvas()
     
     def OnMenuAbout(self, event):  # wxGlade: regionEditor.<event_handler>
         print "About not yet implemented"
@@ -542,14 +538,14 @@ class regionEditor(wx.Frame):
 
     def OnMouseLeftDown(self, event):
         """Save the left click point so it can be used later."""
-        self.leftClickPt, iReg, iPt, iEd = \
+        self.leftClickPt, iReg, iPt, iEd, snapped = \
             self.SnapPoint(self.Pix2Map(event.GetPosition()))
 
     def OnMouseLeftUp(self, event):
         """Perform appropriate action based on current mode of operation."""
         # Get click position
         ptPix = event.GetPosition()
-        pt, iReg, iPt, iEd = self.SnapPoint(self.Pix2Map(ptPix))
+        pt, iReg, iPt, iEd, snapped = self.SnapPoint(self.Pix2Map(ptPix))
         
         # Has been handled by double-click event handler
         if self.justDoubleClicked:
@@ -589,20 +585,25 @@ class regionEditor(wx.Frame):
                     dc = wx.WindowDC(self.canvas)
                     dc.DrawLine(x1pix, y1pix, x2pix, y2pix)
 
-        # Dimensioning region edge
+        # Dimensioning region edge or setting background image scale
         elif self.toggleDim.GetValue():
             # First point on region to be clicked
-            if not self.polyVerts and iReg != -1 and iPt != -1:
+            if (not self.polyVerts or isinstance(self.polyVerts, Point)) \
+                    and iReg != -1 and iPt != -1:
                 # Store region and point indeces
                 self.polyVerts = (iReg, iPt)
-            # Second unique point to be clicked
+            # Second unique point on region to be clicked
             elif iReg != -1 and iPt != -1 and (iReg, iPt) != self.polyVerts:
                 # Request dimension
-                currDist = self.regions[iReg].verts[iPt].Dist(self.regions[\
-                    self.polyVerts[0]].verts[self.polyVerts[1]])
+                currDist = self.regions[iReg].pointArray[iPt].Dist(self.regions[\
+                    self.polyVerts[0]].pointArray[self.polyVerts[1]])
                 dimDlg = wx.TextEntryDialog(self, \
                     "Current Length: %.3f" % currDist, caption='Dimension')
-                if dimDlg.ShowModal() == wx.ID_OK:
+                result = dimDlg.ShowModal() == wx.ID_OK
+                if not result:
+                    # Clear first point
+                    self.polyVerts = []
+                else:
                     # Check for valid dimension (allow negative values)
                     try:
                         dim = float(dimDlg.GetValue())
@@ -612,7 +613,7 @@ class regionEditor(wx.Frame):
                     dimDlg.Destroy()
 
                     # Move second point along same line to specified distance
-                    pt0 = self.regions[self.polyVerts[0]].verts[self.polyVerts[1]]
+                    pt0 = self.regions[self.polyVerts[0]].pointArray[self.polyVerts[1]]
                     signx = 1.0
                     signy = 1.0
                     # Vertical line case
@@ -632,49 +633,86 @@ class regionEditor(wx.Frame):
                             math.sqrt(1 + slope ** 2)
                         dy = slope * dx
                     self.AddToUndo()
-                    self.regions[iReg].verts[iPt] += Point(dx, dy)
+                    self.regions[iReg].pointArray[iPt] += Point(dx, dy)
                     self.polyVerts = []
                     self.RecalcAdjacency(iReg)
                     self.RedrawCanvas()
+            
+            # Clicking on background image
+            elif iReg == -1 and self.InsideBackgroundImage(pt):
+                # First point on background image
+                if not self.polyVerts or isinstance(self.polyVerts, tuple):
+                    self.polyVerts = pt
+                
+                # Second unique point on background image
+                elif pt.Dist(self.polyVerts) > self.tolerance:
+                    # Request dimension
+                    currDist = pt.Dist(self.polyVerts)
+                    dimDlg = wx.TextEntryDialog(self, \
+                        "Current Length: %.3f" % currDist, caption='Dimension')
+                    if dimDlg.ShowModal() == wx.ID_OK:
+                        # Check for valid dimension (disallow negative values)
+                        try:
+                            dim = float(dimDlg.GetValue())
+                            if dim <= 0:
+                                dimDlg.Destroy()
+                                return
+                        except ValueError:
+                            dimDlg.Destroy()
+                            return
+                        dimDlg.Destroy()
+                        
+                        # Rescale image
+                        self.backgroundPosition[1] = \
+                            self.backgroundPosition[1] * dim / currDist
+                        self.RedrawCanvas()
+                    self.polyVerts = []
         
-        # Dragging region(s) or vertices
-        elif self.selectedRegions and \
-                pt.Dist(self.leftClickPt) > self.tolerance:
+        # Dragging region(s) or image or vertices or panning map view
+        elif pt.Dist(self.leftClickPt) > self.tolerance:
             self.leftClickPt, iReg, iPt, iEd, snapped = \
                 self.SnapRegions(self.leftClickPt)
             iRegInner = self.InsideRegions(self.leftClickPt)
             
             # Dragging point(s)
-            if iReg in self.selectedRegions and iPt != -1:
+            if iReg != -1 and iReg in self.selectedRegions and iPt != -1:
                 # Change point position and check adjacencies
                 self.AddToUndo()
-                self.regions[iReg].verts[iPt].Set(pt.x, pt.y)
+                self.regions[iReg].pointArray[iPt].Set(pt.x, pt.y)
                 self.RecalcAdjacency(iReg)
                 self.RedrawCanvas()
             
-            # Dragging region(s)
-            elif iReg in self.selectedRegions or \
-                    iRegInner in self.selectedRegions:
+            # Dragging region(s) and/or background image
+            elif (iReg != -1 and iReg in self.selectedRegions) or \
+                    (iRegInner != -1 and iRegInner in self.selectedRegions) \
+                    or (-1 in self.selectedRegions and \
+                    self.InsideBackgroundImage(self.leftClickPt)):
                 # Change region(s) position and check adjacencies
                 self.AddToUndo()
                 delta = pt - self.leftClickPt
                 for iRegSel in self.selectedRegions:
-                    for iPt in range(len(self.regions[iRegSel].verts)):
-                        self.regions[iRegSel].verts[iPt] += delta
+                    # Change region position
+                    if iRegSel > -1:
+                        for iPt in range(len(self.regions[iRegSel].pointArray)):
+                            self.regions[iRegSel].pointArray[iPt] += delta
+                    # Change background image position
+                    else:
+                        self.backgroundPosition[0] += delta
                 for iRegSel in self.selectedRegions:
-                    self.RecalcAdjacency(iRegSel)
+                    if iRegSel > -1:
+                        self.RecalcAdjacency(iRegSel)
                 self.RedrawCanvas()
         
-        # Panning the map view
-        elif pt.Dist(self.leftClickPt) > self.tolerance:
-            downClickPix = self.Map2Pix(self.leftClickPt)
-            self.canvasOffset = Point(self.canvasScale.x * \
-                (downClickPix[0] - ptPix[0]) + self.canvasOffset.x, \
-                self.canvasScale.y * (downClickPix[1] - ptPix[1]) + \
-                self.canvasOffset.y)
-            self.RedrawCanvas()
+            # Panning the map view
+            else:
+                downClickPix = self.Map2Pix(self.leftClickPt)
+                self.canvasOffset = Point(self.canvasScale.x * \
+                    (downClickPix[0] - ptPix[0]) + self.canvasOffset.x, \
+                    self.canvasScale.y * (downClickPix[1] - ptPix[1]) + \
+                    self.canvasOffset.y)
+                self.RedrawCanvas()
         
-        # Check if selecting or deselecting a region
+        # Check if selecting or deselecting a region or background image
         else:
             if iReg != -1:
                 iRegInner = iReg
@@ -682,7 +720,8 @@ class regionEditor(wx.Frame):
                 iRegInner = self.InsideRegions(pt)
             
             # Do something about that region selection
-            if iRegInner != -1:
+            # If selecting background image, put -1 as index in selectedRegions
+            if iRegInner != -1 or self.InsideBackgroundImage(pt):
                 # Selecting single region
                 if not event.CmdDown():
                     self.selectedRegions = []
@@ -720,15 +759,15 @@ class regionEditor(wx.Frame):
             # Unset double-click flag since event does not propagate here
             self.justDoubleClicked = False
             
-            # Edit the latest selected region
-            iReg = self.selectedRegions.pop()
-            self.selectedRegions = []
-            self.selectedRegions.append(iReg)
-            self.EditRegion(iReg)
+            # Edit clicked region if selected
+            iReg = self.InsideRegions(self.Pix2Map(event.GetPosition()))
+            if iReg != -1 and iReg in self.selectedRegions:
+                self.selectedRegions = [iReg]
+                self.EditRegion(iReg)
     
     def OnMouseRightDown(self, event):
         """Save the right click point so it can be used later."""
-        self.rightClickPt, iReg, iPt, iEd = \
+        self.rightClickPt, iReg, iPt, iEd, snapped = \
             self.SnapPoint(self.Pix2Map(event.GetPosition()))
 
     def OnMouseRightUp(self, event):
@@ -751,6 +790,102 @@ class regionEditor(wx.Frame):
             self.canvasScale.y * (1 - scaler) + self.canvasOffset.y)
         self.canvasScale = self.canvasScale * scaler
         self.RedrawCanvas()
+    
+    def OnMouseMotion(self, event):
+        """Show appropriate display if mouse is in motion."""
+        # Get position and information
+        ptPix = event.GetPosition()
+        pt, iReg, iPt, iEd, snapped = self.SnapPoint(self.Pix2Map(ptPix))
+        
+        # Set mouse cursor display and position as appropriate
+        # Snapping to something
+        if self.toggleSquare.GetValue() or self.togglePoly.GetValue() or \
+                self.toggleDim.GetValue():
+            if snapped:
+                self.canvas.SetCursor(wx.StockCursor(wx.CURSOR_BULLSEYE))
+            else:
+                self.canvas.SetCursor(wx.StockCursor(wx.CURSOR_CROSS))
+        else:
+            self.canvas.SetCursor(wx.StockCursor(wx.CURSOR_ARROW))
+            
+        
+        # Create device context for drawing
+        dc = wx.WindowDC(self.canvas)
+        dc = wx.GCDC(dc)
+        self.canvas.PrepareDC(dc)
+        dc.BeginDrawing()
+        dc.SetBrush(wx.Brush(wx.WHITE, wx.TRANSPARENT))
+        dc.SetPen(wx.Pen(wx.BLACK, 1, wx.SHORT_DASH))
+        
+        # Draw lines to or around the mouse if necessary
+        # Drawing rectangle
+        if self.toggleSquare.GetValue() and self.polyVerts:
+            self.RedrawVicon()
+            ptPix0 = self.Map2Pix(self.polyVerts[-1])
+            dc.DrawLine(ptPix0[0], ptPix0[1], ptPix[0], ptPix0[1])
+            dc.DrawLine(ptPix[0], ptPix0[1], ptPix[0], ptPix[1])
+            dc.DrawLine(ptPix[0], ptPix[1], ptPix0[0], ptPix[1])
+            dc.DrawLine(ptPix0[0], ptPix[1], ptPix0[0], ptPix0[1])
+        
+        # Drawing a polygon
+        elif self.togglePoly.GetValue() and self.polyVerts:
+            self.RedrawVicon()
+            ptPix0 = self.Map2Pix(self.polyVerts[-1])
+            dc.DrawLine(ptPix0[0], ptPix0[1], ptPix[0], ptPix[1])
+        
+        # Dimensioning an image
+        elif self.toggleDim.GetValue() and self.polyVerts:
+            self.RedrawVicon()
+            ptPix0 = self.Map2Pix(self.regions[self.polyVerts[0]].pointArray[ \
+                self.polyVerts[1]])
+            dc.DrawLine(ptPix0[0], ptPix0[1], ptPix[0], ptPix[1])
+        
+        # Dragging regions(s) or background image
+        elif event.LeftIsDown() and self.selectedRegions:
+            self.leftClickPt, iReg, iPt, iEd, snapped = \
+                self.SnapRegions(self.leftClickPt)
+            iRegInner = self.InsideRegions(self.leftClickPt)
+            # Dragging point
+            if iReg != -1 and iReg in self.selectedRegions and iPt != -1:
+                self.RedrawVicon()
+                # Draw walls that would connect to the new position
+                nPts = len(self.regions[iReg].pointArray)
+                ptPix0 = self.Map2Pix( \
+                    self.regions[iReg].pointArray[iPt - 1 % nPts])
+                ptPix1 = self.Map2Pix( \
+                    self.regions[iReg].pointArray[iPt + 1 % nPts])
+                dc.DrawLine(ptPix0[0], ptPix0[1], ptPix[0], ptPix[1])
+                dc.DrawLine(ptPix1[0], ptPix1[1], ptPix[0], ptPix[1])
+            
+            # Dragging region(s) and/or background image
+            elif (iReg != -1 and iReg in self.selectedRegions) or \
+                    (iRegInner != -1 and iRegInner in self.selectedRegions) \
+                    or (-1 in self.selectedRegions and \
+                    self.InsideBackgroundImage(self.leftClickPt)):
+                self.RedrawVicon()
+                # Draw region(s)/image in new position(s)
+                delta = pt - self.leftClickPt
+                for iRegSel in self.selectedRegions:
+                    # Region
+                    if iRegSel > -1:
+                        vertsPix = []
+                        for vert in self.regions[iRegSel].pointArray:
+                            vertPix = self.Map2Pix(vert + delta)
+                            vertsPix.append(vertPix)
+                        dc.DrawPolygon(vertsPix)
+                    # Background image
+                    else:
+                        ptPix0 = self.Map2Pix(self.backgroundPosition[0] + \
+                            delta)
+                        ptPix1 = self.Map2Pix(self.backgroundPosition[0] + \
+                            Point(self.backgroundPosition[1].x, \
+                            -self.backgroundPosition[1].y) + delta)
+                        dc.DrawLine(ptPix0[0], ptPix0[1], ptPix1[0], ptPix0[1])
+                        dc.DrawLine(ptPix1[0], ptPix0[1], ptPix1[0], ptPix1[1])
+                        dc.DrawLine(ptPix1[0], ptPix1[1], ptPix0[0], ptPix1[1])
+                        dc.DrawLine(ptPix0[0], ptPix1[1], ptPix0[0], ptPix0[1])
+        
+        dc.EndDrawing()
     
     def OnKeyDown(self, event):
         keycode = event.GetKeyCode()
@@ -838,15 +973,22 @@ class regionEditor(wx.Frame):
         # Clear canvas
         self.canvas.ClearBackground()
         
-        # Create device context if not created
-        if not dc:
-            dc = wx.WindowDC(self.canvas)
-        dc = wx.GCDC(dc)
-        self.canvas.PrepareDC(dc)
-        dc.BeginDrawing()
+        # Create bitmap to draw to
+        width, height = self.canvas.GetSize()
+        self.canvasBitmap = wx.EmptyBitmap(width, height)
+        dc = wx.MemoryDC()
+        dc.SelectObject(self.canvasBitmap)
+        border = [(0, 0), (width, 0), (width, height), (0, height)]
+        dc.SetBrush(wx.Brush(wx.WHITE, wx.SOLID))
+        dc.SetPen(wx.Pen(wx.WHITE, 1, wx.SOLID))
+        dc.DrawPolygon(border)
         
-        # Draw grid background
-        self.DrawGrid(dc)
+        # Draw background image
+        if self.backgroundImage:
+            self.DrawBackgroundImage(dc=dc)
+        
+        # Draw axes and grid
+        self.DrawGrid(dc=dc)
         
         # Redraw all regions
         for region in self.regions:
@@ -856,6 +998,24 @@ class regionEditor(wx.Frame):
         # Lower triangular matrix only
         for iReg in range(1, len(self.adjacent)):
             self.DrawAdjacencies(iReg, dc=dc)
+        
+        dc.SelectObject(wx.NullBitmap)
+        
+        self.RedrawVicon()
+    
+    def RedrawVicon(self):
+        """Redraw the contents of the canvas panel quickly, only worrying about
+        updating the marker positions, currently being created regions, and
+        things connected to mouse-motion/mouse-hover.
+        """
+        # Create device context
+        dc = wx.WindowDC(self.canvas)
+        dc = wx.GCDC(dc)
+        self.canvas.PrepareDC(dc)
+        dc.BeginDrawing()
+        
+        # Draw canvas static images
+        dc.DrawBitmap(self.canvasBitmap, 0, 0)
         
         # Redraw all markers
         self.DrawMarkers(self.markerPoses, dc=dc)
@@ -871,14 +1031,34 @@ class regionEditor(wx.Frame):
                 ptPix2 = self.Map2Pix(self.polyVerts[iVert + 1])
                 dc.DrawLine(ptPix1[0], ptPix1[1], ptPix2[0], ptPix2[1])
         
+        # Redraw feedback points
+        self.DrawFeedbackPoints(self.feedbackPoses, dc=dc)
+        
         dc.EndDrawing()
     
-    def RedrawVicon(self):
-        """Redraw the contents of the canvas panel quickly, only worrying about
-        updating the marker positions and currently being created regions.
-        """
-        # TODO: Save and use image of map to increase speed
-        self.RedrawCanvas()
+    def DrawBackgroundImage(self, dc=None):
+        # Create device context if not created
+        isNewDC = False
+        if not dc:
+            isNewDC = True
+            windc = wx.WindowDC(self.canvas)
+            dc = wx.GCDC(windc)
+            self.canvas.PrepareDC(dc)
+            dc.BeginDrawing()
+        
+        # Rescale image to make sense with current pan/zoom point
+        xPix, yPix = self.Map2Pix(self.backgroundPosition[0])
+        newWidth = int(self.backgroundPosition[1].x / self.canvasScale.x)
+        newHeight = -int(self.backgroundPosition[1].y / self.canvasScale.y)
+        if newHeight > 0 and newWidth > 0:
+            image = self.backgroundImage.Scale(newWidth, newHeight)
+            bitmap = wx.BitmapFromImage(image)
+            
+            # Draw image
+            dc.DrawBitmap(bitmap, xPix, yPix, False)
+        
+        if isNewDC:
+            dc.EndDrawing()
     
     def DrawGrid(self, dc=None):
         """Draw the axes and grid on the map canvas.
@@ -893,17 +1073,25 @@ class regionEditor(wx.Frame):
             dc = wx.GCDC(windc)
             self.canvas.PrepareDC(dc)
             dc.BeginDrawing()
-
-        # Draw axes
-        xOff = self.canvasOffset.x
-        yOff = self.canvasOffset.y
-        xPixOff = int(-xOff / self.canvasScale.x)
-        yPixOff = int(-yOff / self.canvasScale.y)
+        
+        # Draw background gridlines
         colLim, rowLim = self.canvas.GetSize()
+        dc.SetPen(wx.Pen(wx.Colour(220, 220, 220), 1, wx.SOLID))
+        start = self.Pix2Map((0, 0))
+        finish = self.Pix2Map((colLim, rowLim))
+        for x in range(int(start.x) - 1, int(finish.x) + 1):
+            xPix = int((x - self.canvasOffset.x) / self.canvasScale.x)
+            dc.DrawLine(xPix, 0, xPix, rowLim)
+        for y in range(int(start.y) + 1, int(finish.y) - 1, -1):
+            yPix = int((y - self.canvasOffset.y) / self.canvasScale.y)
+            dc.DrawLine(0, yPix, colLim, yPix)
+        
+        # Draw axes
+        dc.SetPen(wx.Pen(wx.Colour(0, 0, 0), 1, wx.SOLID))
+        xPixOff = int(-self.canvasOffset.x / self.canvasScale.x)
+        yPixOff = int(-self.canvasOffset.y / self.canvasScale.y)
         dc.DrawLine(0, yPixOff, colLim, yPixOff)
         dc.DrawLine(xPixOff, 0, xPixOff, rowLim)
-        
-        # TODO: Draw grid/ticks
         
         if isNewDC:
             dc.EndDrawing()
@@ -911,7 +1099,7 @@ class regionEditor(wx.Frame):
     def DrawMarkers(self, poses, dc=None):
         """Draw markers at specified global positions.
 
-        poses - List of tuples containing positions of markers in meters
+        poses - List of Points containing positions of markers in meters
                 [(x, y), ...]
         dc - Device context used for drawing on the canvas panel.
         """
@@ -925,7 +1113,8 @@ class regionEditor(wx.Frame):
             dc.BeginDrawing()
         
         # Set up brush
-        #dc.SetBrush(wx.Brush(wx.Colour(255, 255, 255, 128), wx.SOLID))
+        dc.SetBrush(wx.Brush(wx.Colour(255, 255, 255, 128), wx.SOLID))
+        dc.SetPen(wx.Pen(wx.BLACK, 1, wx.SOLID))
         
         # Draw each marker
         for pose in poses:
@@ -935,10 +1124,39 @@ class regionEditor(wx.Frame):
         if isNewDC:
             dc.EndDrawing()
     
+    def DrawFeedbackPoints(self, poses, dc=None):
+        """Draw points to assist with map building.
+        
+        poses - List of Points with points to draw in global coordinates.
+        dc - Device context for drawing on the canvas.
+        """
+        # Create device context if not created
+        isNewDC = False
+        if not dc:
+            isNewDC = True
+            windc = wx.WindowDC(self.canvas)
+            dc = wx.GCDC(windc)
+            self.canvas.PrepareDC(dc)
+            dc.BeginDrawing()
+        
+        # Set up brush
+        dc.SetBrush(wx.Brush(wx.Colour(255, 0, 0, 128), wx.SOLID))
+        dc.SetPen(wx.Pen(wx.RED, 1, wx.SOLID))
+        
+        # Draw each marker
+        for pose in poses:
+            posePix = self.Map2Pix(pose)
+            dc.DrawCircle(posePix[0], posePix[1], 8)
+        
+        if isNewDC:
+            dc.EndDrawing()
+    
     def DrawSelectionHandle(self, iReg, dc=None):
-        """Draw markers indicating region(s) that have been selected by mouse.
+        """Draw markers indicating region(s) or background image that have 
+        been selected by mouse.
         
         iReg - Index of region selected
+               -1 indicates background image
         dc - Device context used for drawing on the canvas panel
         """
         # Create device context if not created
@@ -950,9 +1168,26 @@ class regionEditor(wx.Frame):
             self.canvas.PrepareDC(dc)
             dc.BeginDrawing()
         
-        for pt in self.regions[iReg].verts:
-            ptPix = self.Map2Pix(pt)
-            dc.DrawCircle(ptPix[0], ptPix[1], 5)
+        # Set up brush
+        dc.SetPen(wx.Pen(wx.Colour(0, 0, 0), 1, wx.SOLID))
+        
+        # Region
+        if iReg > -1:
+            dc.SetBrush(wx.Brush(self.regions[iReg].color, wx.SOLID))
+            for pt in self.regions[iReg].pointArray:
+                ptPix = self.Map2Pix(pt)
+                dc.DrawCircle(ptPix[0], ptPix[1], 5)
+        # Background image
+        else:
+            xPix, yPix = self.Map2Pix(self.backgroundPosition[0])
+            newWidth = int(self.backgroundPosition[1].x / self.canvasScale.x)
+            newHeight = -int(self.backgroundPosition[1].y / self.canvasScale.y)
+            if newWidth > 0 and newHeight > 0:
+                dc.SetBrush(wx.Brush(wx.Colour(255, 255, 255), wx.SOLID))
+                dc.DrawCircle(xPix, yPix, 5)
+                dc.DrawCircle(xPix + newWidth, yPix, 5)
+                dc.DrawCircle(xPix + newWidth, yPix + newHeight, 5)
+                dc.DrawCircle(xPix, yPix + newHeight, 5)
         
         if isNewDC:
             dc.EndDrawing()
@@ -1002,7 +1237,7 @@ class regionEditor(wx.Frame):
         vertsPix = []
         xLabelPix = 0
         yLabelPix = 0
-        for vert in region.verts:
+        for vert in region.pointArray:
             vertPix = self.Map2Pix(vert)
             vertsPix.append(vertPix)
             if not isBoundary:          # Put label in center
@@ -1015,8 +1250,8 @@ class regionEditor(wx.Frame):
         if isBoundary:
             xLabelPix = xLabelPix - labelWidth
         else:
-            xLabelPix = xLabelPix / len(region.verts) - labelWidth / 2
-            yLabelPix = yLabelPix / len(region.verts) - labelHeight / 2
+            xLabelPix = xLabelPix / len(region.pointArray) - labelWidth / 2
+            yLabelPix = yLabelPix / len(region.pointArray) - labelHeight / 2
         
         # Draw label
         if not isBoundary:
@@ -1049,15 +1284,100 @@ class regionEditor(wx.Frame):
         for jReg in range(iReg):
             for iREdge1, iREdge2 in self.adjacent[iReg][jReg]:
                 # Not last edge in region
-                pt1 = self.regions[iReg].verts[iREdge1]
-                if iREdge1 < len(self.regions[iReg].verts) - 1:
-                    pt2 = self.regions[iReg].verts[iREdge1 + 1]
+                pt1 = self.regions[iReg].pointArray[iREdge1]
+                if iREdge1 < len(self.regions[iReg].pointArray) - 1:
+                    pt2 = self.regions[iReg].pointArray[iREdge1 + 1]
                 # Last edge in region
                 else:
-                    pt2 = self.regions[iReg].verts[0]
+                    pt2 = self.regions[iReg].pointArray[0]
                 pt1Pix = self.Map2Pix(pt1)
                 pt2Pix = self.Map2Pix(pt2)
                 dc.DrawLine(pt1Pix[0], pt1Pix[1], pt2Pix[0], pt2Pix[1])
+    
+    def LoadBackgroundImage(self, filePath):
+        image = wx.Image(filePath)
+        if not image.IsOk(): 
+            wx.MessageBox("Cannot import image from file %s" % \
+                (os.path.basename(filePath)), "Error",
+                style = wx.OK | wx.ICON_ERROR, parent=self)
+            return
+        
+        self.backgroundImage = image
+        self.backgroundFile = os.path.relpath(filePath, \
+            os.path.dirname(self.fileName))
+        
+        # If image position is unknown, just keep same image size
+        if not self.backgroundPosition:
+            leftTop = self.Pix2Map((0, 0))
+            xExtent = float(image.GetWidth()) * self.canvasScale.x
+            yExtent = -float(image.GetHeight()) * self.canvasScale.y
+            self.backgroundPosition = [leftTop, Point(xExtent, yExtent)]
+        
+        # Redraw the map with the image
+        self.RedrawCanvas()
+    
+    def ReadFile(self, filePath):
+        """Extract data from the regions file specified.
+        
+        filePath - String specifying absolute file path.
+        """
+        # Pull all data from file into dictionary for parsing
+        data = fileMethods.readFromFile(filePath)
+        
+        if data is None:
+            return
+        
+        # Clear all current information
+        self.regions = []
+        self.adjacent = []
+        self.backgroundImage = None
+        self.backgroundFile = ""
+        self.backgroundPosition = None
+        
+        # Load background image if it is defined
+        if "Background" in data and data["Background"][0] != "None":
+            backgroundPath = os.path.join(os.path.dirname(self.fileName), \
+                data["Background"][0])
+            if len(data["Background"]) == 5:
+                self.backgroundPosition = \
+                    [Point(float(data["Background"][1]), \
+                    float(data["Background"][2])), \
+                    Point(float(data["Background"][3]), \
+                    float(data["Background"][4]))]
+            self.LoadBackgroundImage(backgroundPath)
+        
+        # Set all region information from lines in file
+        rdata = json.loads("\n".join(data["Regions"]))
+        for rd in rdata:
+            newRegion = Region()
+            newRegion.setData(rd)
+            self.regions.append(newRegion)
+
+        # Make an empty adjacency matrix of size (nRegions) x (nRegions)
+        self.adjacent = [[[] for j in range(len(self.regions))] \
+            for i in range(len(self.regions))]
+        
+        # Assign region transitions
+        # Each transition line format is this:
+        # Region1Idx Region2Idx [(Reg1FaceIdx1 Reg2FaceIdx1) (Reg1FaceIdx2 Reg2FaceIdx2) ...]
+        for tData in data["Transitions"]:
+            tData = re.sub('[\[\]\(\)]', '', tData)
+            tData = tData.split();      # Separate on any whitespace
+            iReg1 = self.indexOfRegionWithName(tData[0])
+            iReg2 = self.indexOfRegionWithName(tData[1])
+            # All transitions between regions
+            for i in range(2, len(transData), 2):
+                iFaceReg1 = int(tData[i])
+                iFaceReg2 = int(tData[i+1])
+                self.adjacent[iReg1][iReg2].append((iFaceReg1, iFaceReg2))
+                # Don't assume bidirectional transitions
+                # Region file will specify both directions if bidirectional
+                
+        # Set "obstacleness" of regions
+        if "Obstacles" in data:
+            for regName in data["Obstacles"]:
+                self.regions[self.indexOfRegionWithName( \
+                    regName)].isObstacle = True
     
     def ResetMapToggles(self, toggleStay=None):
         """Clear all the other map-feature toggle buttons.
@@ -1097,8 +1417,7 @@ class regionEditor(wx.Frame):
         # Cleanup and draw
         self.polyVerts = []
         self.polyAdjEdges = []
-        self.DrawRegion(region)
-        self.DrawAdjacencies(idxNewReg)
+        self.RedrawCanvas()
     
     def DeleteRegion(self, iReg):
         """Removes region from regions list and adjacency list.
@@ -1122,7 +1441,7 @@ class regionEditor(wx.Frame):
         iEdge - Int, index of the edge to replace with edges to and from pt
         """
         # Add point to other region
-        self.regions[iReg].verts.insert(iEdge + 1, copy.copy(pt))
+        self.regions[iReg].pointArray.insert(iEdge + 1, copy.copy(pt))
         # Update all transition edges
         # Loop through all regions
         for jReg in range(len(self.adjacent[iReg])):
@@ -1227,12 +1546,12 @@ class regionEditor(wx.Frame):
         # Keeps track of the colocation of vertices of this region with points
         # of other regions
         # List of lists of tuples
-        # Outer list - len(vertColloc) == len(reg.verts)
+        # Outer list - len(vertColloc) == len(reg.pointArray)
         # Inner list - Contains collocation information for each region vertex
         # Tuple - Contains collocation information from vertex on this region
         #         to vertex on another region in the format:
         #         (iReg, iPt)
-        vertsColloc = [[] for iPt in xrange(len(reg.verts))]
+        vertsColloc = [[] for iPt in xrange(len(reg.pointArray))]
         
         # Check all other regions against this region
         for iOthReg in range(len(self.regions[iRegStart:])):
@@ -1241,7 +1560,7 @@ class regionEditor(wx.Frame):
                     self.regions[iOthReg].name.lower() == "boundary":
                 continue
             
-            for iOthPt, othPt in enumerate(self.regions[iOthReg].verts):
+            for iOthPt, othPt in enumerate(self.regions[iOthReg].pointArray):
                 pt, iPt, iEd, snapped = self.Snap1Region(reg, othPt)
                 # Other region vertex snapped to wall of new region
                 if iEd != -1:
@@ -1252,7 +1571,7 @@ class regionEditor(wx.Frame):
                     # Recheck it in next loop so we can look at all regions
         
         # Check this region against others and create new vertices as necessary
-        for iPt, pt in enumerate(reg.verts):
+        for iPt, pt in enumerate(reg.pointArray):
             snapResults = self.SnapRegions(pt, checkAll=True)
             # Process the "nearness" information
             for othPt, iOthReg, iOthPt, iOthEd in snapResults:
@@ -1272,11 +1591,11 @@ class regionEditor(wx.Frame):
                     vertsColloc[iPt].append((iOthReg, iOthEd + 1))
         
         # Now look for adjacent edges and update transition matrix accordingly
-        for iPt in range(len(reg.verts)):       # Start point of edge
-            jPt = (iPt + 1) % len(reg.verts)    # End point of edge
+        for iPt in range(len(reg.pointArray)):       # Start point of edge
+            jPt = (iPt + 1) % len(reg.pointArray)    # End point of edge
             for iOthReg, iOthPt in vertsColloc[iPt]:
-                jOthPt1 = (iOthPt - 1) % len(self.regions[iOthReg].verts)
-                jOthPt2 = (iOthPt + 1) % len(self.regions[iOthReg].verts)
+                jOthPt1 = (iOthPt - 1) % len(self.regions[iOthReg].pointArray)
+                jOthPt2 = (iOthPt + 1) % len(self.regions[iOthReg].pointArray)
                 # Check edge on other region prior to point
                 if (iOthReg, jOthPt1) in vertsColloc[jPt]:
                     # Indicate transition from this region to other region
@@ -1331,7 +1650,7 @@ class regionEditor(wx.Frame):
             miny = float('inf')
             maxy = float('-inf')
             for reg in self.regions:
-                for pt in reg.verts:
+                for pt in reg.pointArray:
                     minx = min(minx, pt.x)
                     maxx = max(maxx, pt.x)
                     miny = min(miny, pt.y)
@@ -1346,7 +1665,6 @@ class regionEditor(wx.Frame):
         # Note that this is only called when doing a new action,
         # not when redoing since this clears the redo buffer
         action = Action(self.regions, self.adjacent)
-        print action.stateRegions, action.stateAdjacent
         self.undoActions.append(action)
         while len(self.undoActions) > self.unredoBufLen:
             self.undoActions.popleft()
@@ -1357,15 +1675,17 @@ class regionEditor(wx.Frame):
         """Snap the point to any nearby Vicon or region point.
 
         pt - Point object, map coordinates of point
-        returns - (snappedPt, idxRegion, idxRPoint, idxREdge)
+        returns - (snappedPt, idxRegion, idxRPoint, idxREdge, snapped)
             snappedPt - Point object, point after snapping
             idxRegion - int, index of region if snapped to region point/edge
                         if not snapped to region it will be -1
-            idxRPoint - int, index of point in region.verts if snapped to point
+            idxRPoint - int, index of point in region.pointArray if snapped to point
                         if not snapped to point it will be -1
             idxREdge - int, index of side in region if snapped to edge
-                       edge j is defined by region.verts[j:j+1]
+                       edge j is defined by region.pointArray[j:j+1]
                        if not snapped to edge it will be -1
+            snapped - boolean, indicating if it snapped to anything, including
+                      temporary regions and vicon markers
         """
         # TODO: Make menubar checkbox to disable/enable snapto
         # Check through all region points and edges first
@@ -1383,7 +1703,7 @@ class regionEditor(wx.Frame):
         pt, idxMarker, snapped = self.SnapVicon(pt, snapped)
 
         # Only return region indices, since they are usually all that matter
-        return pt, idxRegion, idxRPoint, idxREdge
+        return pt, idxRegion, idxRPoint, idxREdge, snapped
 
     def SnapRegions(self, pt, checkAll=False, snapped=False):
         """Snap the point to any sufficiently "nearby" region vertex or wall.
@@ -1403,10 +1723,10 @@ class regionEditor(wx.Frame):
                 snappedPt - Point object, point after snapping
                 idxRegion - int, index of region if snapped to region point/edge
                             if not snapped to region it will be -1
-                idxRPoint - int, index of point in region.verts if snapped to point
+                idxRPoint - int, index of point in region.pointArray if snapped to point
                             if not snapped to point it will be -1
                 idxREdge - int, index of side in region if snapped to edge
-                           edge j is defined by region.verts[j:j+1]
+                           edge j is defined by region.pointArray[j:j+1]
                            if not snapped to edge it will be -1
                 snapped - Boolean, true if point has been snapped, false if not
                           Note that if input snapped is true, output will be true
@@ -1447,10 +1767,10 @@ class regionEditor(wx.Frame):
                   If point is already snapped, this function will just return
         returns - (snappedPt, idxRPoint, idxREdge, snapped)
             snappedPt - Point object, point after snapping
-            idxRPoint - int, index of point in region.verts if snapped to point
+            idxRPoint - int, index of point in region.pointArray if snapped to point
                         if not snapped to point it will be -1
             idxREdge - int, index of side in region if snapped to edge
-                       edge j is defined by region.verts[j:j+1]
+                       edge j is defined by region.pointArray[j:j+1]
                        if not snapped to edge it will be -1
             snapped - Boolean, true if point has been snapped, false if not
                       Note that if input snapped is true, output will be true
@@ -1459,22 +1779,22 @@ class regionEditor(wx.Frame):
         idxRPoint = -1
         idxREdge = -1
         # Check first point
-        chkPt = region.verts[0]
+        chkPt = region.pointArray[0]
         if (not snapped) and pt.Dist(chkPt) < self.tolerance:
             pt = chkPt
             snapped = True
             idxRPoint = 0
         j = 1   # Region point incrementer
-        while (not snapped) and j < len(region.verts):
+        while (not snapped) and j < len(region.pointArray):
             # Check next point
-            chkPt = region.verts[j]
+            chkPt = region.pointArray[j]
             if pt.Dist(chkPt) < self.tolerance:
                 pt = chkPt
                 snapped = True
                 idxRPoint = j
             # Check edge between previous and just-checked point
             else:
-                p0 = region.verts[j - 1]
+                p0 = region.pointArray[j - 1]
                 p1 = chkPt
                 chkPt = self.ProjPtOnLine(pt, p0, p1)
                 # Check that projected point is on finite line and close
@@ -1489,8 +1809,8 @@ class regionEditor(wx.Frame):
             j += 1
         # Check last edge
         if not snapped:
-            p0 = region.verts[j - 1]
-            p1 = region.verts[0]
+            p0 = region.pointArray[j - 1]
+            p1 = region.pointArray[0]
             chkPt = self.ProjPtOnLine(pt, p0, p1)
             if pt.Dist(chkPt) < self.tolerance and \
                     chkPt.x <= max(p0.x, p1.x) and \
@@ -1520,7 +1840,8 @@ class regionEditor(wx.Frame):
         """
         idxPoint = -1
         i = 0       # Misc point incrementer
-        while (not snapped) and i < len(self.polyVerts):
+        while (not snapped) and isinstance(self.polyVerts, list) and \
+                i < len(self.polyVerts):
             chkPt = self.polyVerts[i]
             if pt.Dist(chkPt) < self.tolerance:
                 pt = chkPt
@@ -1573,6 +1894,19 @@ class regionEditor(wx.Frame):
             i -= 1
         
         return iReg
+    
+    def InsideBackgroundImage(self, pt):
+        """Indicates if the given point was clicked inside the background image.
+        
+        Returns a boolean.
+        """
+        return self.backgroundImage and \
+            pt.x > self.backgroundPosition[0].x and \
+            pt.x < self.backgroundPosition[0].x + \
+            self.backgroundPosition[1].x and \
+            pt.y < self.backgroundPosition[0].y and \
+            pt.y > self.backgroundPosition[0].y - \
+            self.backgroundPosition[1].y
     
     def Map2Pix(self, pose):
         """Convert from map coordinates to pixel coordinates.
@@ -1697,7 +2031,7 @@ class FeedbackDialog(wx.Dialog):
             # First region
             else:
                 self.currReg = len(self.parent.regions) - 1
-            self.currPt = len(self.parent.regions[self.currReg].verts) - 1
+            self.currPt = len(self.parent.regions[self.currReg].pointArray) - 1
 
     def OnButtonPick(self, event):  # wxGlade: FeedbackDialog.<event_handler>
         #self.parent.Raise()
@@ -1706,7 +2040,7 @@ class FeedbackDialog(wx.Dialog):
     def OnButtonNext(self, event):  # wxGlade: FeedbackDialog.<event_handler>
         """Move on to next point."""
         # Not last point in region
-        if self.currPt < len(self.parent.regions[self.currReg].verts) - 1:
+        if self.currPt < len(self.parent.regions[self.currReg].pointArray) - 1:
             self.currPt += 1
         # Last point in region
         else:
@@ -1718,6 +2052,7 @@ class FeedbackDialog(wx.Dialog):
                 self.currReg = 0
             self.currPt = 0
 # end of class FeedbackDialog
+
 
 class RegionEditDialog(wx.Dialog):
     def __init__(self, *args, **kwds):
@@ -1764,918 +2099,6 @@ class RegionEditDialog(wx.Dialog):
         # end wxGlade
 # end of class RegionEditDialog
 
-class CalibrationFrame(wx.Frame):
-    def __init__(self, *args, **kwds):
-        # begin wxGlade: CalibrationFrame.__init__
-        kwds["style"] = wx.DEFAULT_FRAME_STYLE
-        wx.Frame.__init__(self, *args, **kwds)
-        
-        # Menu Bar
-        self.calibFrame_menubar = wx.MenuBar()
-        self.filemenu = wx.Menu()
-        self.menuReset = wx.MenuItem(self.filemenu, wx.NewId(), "Reset", "", wx.ITEM_NORMAL)
-        self.filemenu.AppendItem(self.menuReset)
-        self.menuSave = wx.MenuItem(self.filemenu, wx.NewId(), "Save", "", wx.ITEM_NORMAL)
-        self.filemenu.AppendItem(self.menuSave)
-        self.menuExit = wx.MenuItem(self.filemenu, wx.NewId(), "Exit", "", wx.ITEM_NORMAL)
-        self.filemenu.AppendItem(self.menuExit)
-        self.calibFrame_menubar.Append(self.filemenu, "File")
-        self.editmenu = wx.Menu()
-        self.menuUndo = wx.MenuItem(self.editmenu, wx.NewId(), "Undo", "", wx.ITEM_NORMAL)
-        self.editmenu.AppendItem(self.menuUndo)
-        self.menuRedo = wx.MenuItem(self.editmenu, wx.NewId(), "Redo", "", wx.ITEM_NORMAL)
-        self.editmenu.AppendItem(self.menuRedo)
-        self.editmenu.AppendSeparator()
-        self.menuSelectAll = wx.MenuItem(self.editmenu, wx.NewId(), "Select All", "", wx.ITEM_NORMAL)
-        self.editmenu.AppendItem(self.menuSelectAll)
-        self.menuClearAll = wx.MenuItem(self.editmenu, wx.NewId(), "Clear All Points", "", wx.ITEM_NORMAL)
-        self.editmenu.AppendItem(self.menuClearAll)
-        self.calibFrame_menubar.Append(self.editmenu, "Edit")
-        self.toolsmenu = wx.Menu()
-        self.menuShowMarkers = wx.MenuItem(self.toolsmenu, wx.NewId(), "Show Markers", "", wx.ITEM_CHECK)
-        self.toolsmenu.AppendItem(self.menuShowMarkers)
-        self.menuClearMarkers = wx.MenuItem(self.toolsmenu, wx.NewId(), "Clear Markers", "", wx.ITEM_NORMAL)
-        self.toolsmenu.AppendItem(self.menuClearMarkers)
-        self.toolsmenu.AppendSeparator()
-        self.menuLoadImage = wx.MenuItem(self.toolsmenu, wx.NewId(), "Load Image", "", wx.ITEM_NORMAL)
-        self.toolsmenu.AppendItem(self.menuLoadImage)
-        self.menuDimen = wx.MenuItem(self.toolsmenu, wx.NewId(), "Dimension Image", "", wx.ITEM_NORMAL)
-        self.toolsmenu.AppendItem(self.menuDimen)
-        self.menuClearImage = wx.MenuItem(self.toolsmenu, wx.NewId(), "Clear Image", "", wx.ITEM_NORMAL)
-        self.toolsmenu.AppendItem(self.menuClearImage)
-        self.calibFrame_menubar.Append(self.toolsmenu, "Tools")
-        self.helpmenu = wx.Menu()
-        self.menuHowTo = wx.MenuItem(self.helpmenu, wx.NewId(), "How To Use", "", wx.ITEM_NORMAL)
-        self.helpmenu.AppendItem(self.menuHowTo)
-        self.menuAbout = wx.MenuItem(self.helpmenu, wx.NewId(), "About", "", wx.ITEM_NORMAL)
-        self.helpmenu.AppendItem(self.menuAbout)
-        self.calibFrame_menubar.Append(self.helpmenu, "Help")
-        self.SetMenuBar(self.calibFrame_menubar)
-        # Menu Bar end
-        self.sidebar = wx.Panel(self, -1)
-        self.toggleVicon = wx.ToggleButton(self.sidebar, -1, "Markers")
-        self.buttonImage = wx.Button(self.sidebar, -1, "Image")
-        self.toggleAddPoint = wx.ToggleButton(self.sidebar, -1, "Point +")
-        self.toggleDeletePoint = wx.ToggleButton(self.sidebar, -1, "Point -")
-        self.textEnterPointX = wx.TextCtrl(self.sidebar, -1, "")
-        self.textEnterPointY = wx.TextCtrl(self.sidebar, -1, "")
-        self.buttonEnterPoint = wx.Button(self.sidebar, wx.ID_OK, "OK")
-        self.toggleDimen = wx.ToggleButton(self.sidebar, -1, "Dimen.")
-        self.buttonSave = wx.Button(self.sidebar, -1, "Save")
-        self.chkbxShear = wx.CheckBox(self.sidebar, -1, "Lock aspect ratio")
-        self.map = wx.Panel(self, -1, style=wx.SUNKEN_BORDER | wx.TAB_TRAVERSAL)
-        self.ref = wx.Panel(self, -1, style=wx.SUNKEN_BORDER | wx.TAB_TRAVERSAL)
-
-        self.__set_properties()
-        self.__do_layout()
-
-        self.Bind(wx.EVT_MENU, self.OnMenuReset, self.menuReset)
-        self.Bind(wx.EVT_MENU, self.OnMenuSave, self.menuSave)
-        self.Bind(wx.EVT_MENU, self.OnMenuExit, self.menuExit)
-        self.Bind(wx.EVT_MENU, self.OnMenuUndo, self.menuUndo)
-        self.Bind(wx.EVT_MENU, self.OnMenuRedo, self.menuRedo)
-        self.Bind(wx.EVT_MENU, self.OnMenuSelectAll, self.menuSelectAll)
-        self.Bind(wx.EVT_MENU, self.OnMenuClearAll, self.menuClearAll)
-        self.Bind(wx.EVT_MENU, self.OnMenuShowMarkers, self.menuShowMarkers)
-        self.Bind(wx.EVT_MENU, self.OnMenuClearMarkers, self.menuClearMarkers)
-        self.Bind(wx.EVT_MENU, self.OnMenuLoadImage, self.menuLoadImage)
-        self.Bind(wx.EVT_MENU, self.OnMenuDimen, self.menuDimen)
-        self.Bind(wx.EVT_MENU, self.OnMenuClearImage, self.menuClearImage)
-        self.Bind(wx.EVT_MENU, self.OnMenuHowTo, self.menuHowTo)
-        self.Bind(wx.EVT_MENU, self.OnMenuAbout, self.menuAbout)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleVicon, self.toggleVicon)
-        self.Bind(wx.EVT_BUTTON, self.OnButtonImage, self.buttonImage)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleAddPoint, self.toggleAddPoint)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleDeletePoint, self.toggleDeletePoint)
-        self.Bind(wx.EVT_BUTTON, self.OnButtonEnterPoint, id=wx.ID_OK)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleDimen, self.toggleDimen)
-        self.Bind(wx.EVT_BUTTON, self.OnButtonSave, self.buttonSave)
-        # end wxGlade
-        
-        # Check that regionEditor object was passed in correctly
-        if len(args) > 0 and isinstance(args[0], regionEditor):
-            self.parent = args[0]
-            if not self.parent.regions:
-                print "No regions defined. Exiting calibration."
-                self.Destroy()
-        else:
-            print "No regionEditor object passed in. Exiting calibration."
-            self.Destroy()
-        
-        # Bind mouse events
-        self.map.Bind(wx.EVT_LEFT_DOWN, self.OnMapMouseLeftDown, self.map)
-        self.map.Bind(wx.EVT_LEFT_UP, self.OnMapMouseLeftUp, self.map)
-        self.map.Bind(wx.EVT_MOUSEWHEEL, self.OnMapMouseWheel, self.map)
-        self.map.Bind(wx.EVT_ENTER_WINDOW, self.OnMapEnterWindow, self.map)
-        self.map.Bind(wx.EVT_LEAVE_WINDOW, self.OnMapLeaveWindow, self.map)
-        self.ref.Bind(wx.EVT_LEFT_DOWN, self.OnRefMouseLeftDown, self.ref)
-        self.ref.Bind(wx.EVT_LEFT_UP, self.OnRefMouseLeftUp, self.ref)
-        self.ref.Bind(wx.EVT_MOUSEWHEEL, self.OnRefMouseWheel, self.ref)
-        self.ref.Bind(wx.EVT_ENTER_WINDOW, self.OnRefEnterWindow, self.ref)
-        self.ref.Bind(wx.EVT_LEAVE_WINDOW, self.OnRefLeaveWindow, self.ref)
-        
-        # Bind keyboard events
-        self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown, self)
-        self.map.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown, self.map)
-        self.ref.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown, self.ref)
-        
-        # Add close event handler to cleanup before closing
-        self.Bind(wx.EVT_CLOSE, self.OnClose)
-        
-        # Determine mapping of the map panel to the field
-        # Avoid difficulties by having same scale for x and y
-        mapLen = self.map.GetSize() # Initial size of map panel (pixels)
-        # Initial range of field (xmin, xmax, ymin, ymax)
-        xmin, xmax, ymin, ymax = self.parent.GetMapBoundaries()
-        # pose = pixPose * scale + offset
-        # Note: y-pixels and y-pose have opposite directions
-        xScale = (xmax - xmin) / float(mapLen[0])
-        yScale = (ymax - ymin) / float(mapLen[1])
-        maxScale = max(xScale, yScale)
-        xOffset = xmin
-        yOffset = ymax
-        self.mapScale = Point(maxScale, -maxScale)
-        self.mapOffset = Point(xOffset, yOffset)
-        # Determine initial mapping of the reference panel to the field
-        # Initially defines a 1:1 mapping (at least scale/offset-wise) to map
-        refLen = self.ref.GetSize() # Initial size of reference panel (pixels)
-        xScale = (xmax - xmin) / float(refLen[0])
-        yScale = (ymax - ymin) / float(refLen[1])
-        maxScale = max(xScale, yScale)
-        xOffset = xmin
-        yOffset = ymax
-        self.refScale = Point(maxScale, -maxScale)
-        self.refOffset = Point(xOffset, yOffset)
-        
-        # Calibration-related parameters
-        self.calibPoints = []       # List of lists of Points
-                                    # matching map to reference positions
-                                    # [[mapPt1, refPt1], [mapPt2, refPt2], ...]
-        self.newCalibPt = [None, None]  # List of two points
-                                        # for creating new calibration points
-                                        # [mapNewPt, refNewPt]
-        
-        # Mouse-related parameters
-        self.mapLeftClickPt = Point(0.0, 0.0)
-        self.refLeftClickPt = Point(0.0, 0.0)
-        self.selectedPoints = []    # Points that have been selected by mouse
-        tolerance = 5.0             # Pixel tolerance to consider "same point"
-        self.mapTolerance = tolerance * self.mapScale.x
-        self.refTolerance = tolerance * self.refScale.x
-        
-        # Set up for undo/redo capabilities
-        # TODO: Disable self.menuUndo and self.menuRedo
-        self.unredoBufLen = 50
-        self.undoActions = collections.deque()
-        self.redoActions = collections.deque()
-        
-        # Create Vicon listener
-        self.markerPoses = []   # Marker positions to be drawn
-        self.viconListener = ViconMarkerListener(self)
-        
-        # Display the GUI window and set up the map canvas
-        self.Show()
-        self.RedrawMap()
-        
-    
-    def __set_properties(self):
-        # begin wxGlade: CalibrationFrame.__set_properties
-        self.SetTitle("Map Calibration")
-        self.SetBackgroundColour(wx.Colour(240, 240, 240))
-        self.toggleVicon.SetMinSize((50, 50))
-        self.buttonImage.SetMinSize((50, 50))
-        self.toggleAddPoint.SetMinSize((50, 50))
-        self.toggleDeletePoint.SetMinSize((50, 50))
-        self.textEnterPointX.SetMinSize((40, 25))
-        self.textEnterPointX.SetToolTipString("x")
-        self.textEnterPointY.SetMinSize((40, 25))
-        self.textEnterPointY.SetToolTipString("y")
-        self.buttonEnterPoint.SetMinSize((25, 25))
-        self.toggleDimen.SetMinSize((50, 50))
-        self.buttonSave.SetMinSize((50, 50))
-        self.chkbxShear.SetValue(1)
-        self.sidebar.SetMinSize((110, 268))
-        self.map.SetMinSize((600, 300))
-        self.map.SetBackgroundColour(wx.Colour(255, 255, 255))
-        self.ref.SetMinSize((600, 300))
-        self.ref.SetBackgroundColour(wx.Colour(255, 255, 255))
-        # end wxGlade
-
-    def __do_layout(self):
-        # begin wxGlade: CalibrationFrame.__do_layout
-        sizer_6 = wx.BoxSizer(wx.HORIZONTAL)
-        sizer_7 = wx.BoxSizer(wx.VERTICAL)
-        sizer_8 = wx.BoxSizer(wx.VERTICAL)
-        sizer_12 = wx.BoxSizer(wx.HORIZONTAL)
-        sizer_11 = wx.BoxSizer(wx.HORIZONTAL)
-        sizer_10 = wx.BoxSizer(wx.HORIZONTAL)
-        sizer_9 = wx.BoxSizer(wx.HORIZONTAL)
-        sizer_9.Add(self.toggleVicon, 0, wx.RIGHT | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
-        sizer_9.Add(self.buttonImage, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        sizer_8.Add(sizer_9, 1, wx.TOP | wx.BOTTOM | wx.EXPAND, 5)
-        sizer_10.Add(self.toggleAddPoint, 0, wx.RIGHT | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
-        sizer_10.Add(self.toggleDeletePoint, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        sizer_8.Add(sizer_10, 1, wx.TOP | wx.BOTTOM | wx.EXPAND, 5)
-        sizer_11.Add(self.textEnterPointX, 0, wx.ALIGN_CENTER_VERTICAL, 0)
-        sizer_11.Add(self.textEnterPointY, 0, wx.ALIGN_CENTER_VERTICAL, 0)
-        sizer_11.Add(self.buttonEnterPoint, 0, wx.ALIGN_RIGHT | wx.ALIGN_CENTER_VERTICAL, 0)
-        sizer_8.Add(sizer_11, 1, wx.TOP | wx.BOTTOM | wx.EXPAND, 5)
-        sizer_12.Add(self.toggleDimen, 0, wx.RIGHT | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
-        sizer_12.Add(self.buttonSave, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        sizer_8.Add(sizer_12, 1, wx.EXPAND, 0)
-        sizer_8.Add(self.chkbxShear, 0, wx.TOP | wx.BOTTOM | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
-        self.sidebar.SetSizer(sizer_8)
-        sizer_6.Add(self.sidebar, 0, 0, 0)
-        sizer_7.Add(self.map, 1, wx.BOTTOM | wx.EXPAND, 3)
-        sizer_7.Add(self.ref, 1, wx.TOP | wx.EXPAND, 3)
-        sizer_6.Add(sizer_7, 1, wx.EXPAND, 0)
-        self.SetSizer(sizer_6)
-        sizer_6.Fit(self)
-        self.Layout()
-        # end wxGlade
-    
-    def OnClose(self, event):
-        """Perform cleanup tasks and close the application."""
-        self.viconListener.stop()
-        self.Destroy()
-        
-    def OnMenuReset(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        """Clear all calibration points, background images, and markers."""
-        self.OnMenuClearMarkers(None)
-        self.OnMenuClearImage(None)
-        self.OnMenuClearAll(None)
-    
-    def OnMenuSave(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        """Performs calibration on regions using calibration points to
-        calculate a transformation matrix that includes rotation. Moves all the
-        region points as appropriate, then close this GUI."""
-        # Check that sufficient number of calibration points have been defined
-        if len(self.calibPoints) < 3:
-            msg = "Calibration requires that at least 3 calibration " + \
-                "points are defined. Please define more points."
-            notifyDialog = wx.MessageDialog(self, msg, \
-                style=wx.OK|wx.ICON_EXCLAMATION|wx.STAY_ON_TOP)
-            notifyDialog.ShowModal()
-            notifyDialog.Destroy()
-            return
-        
-        # Put calibration points into desired format
-        mapPts = numpy.mat([self.calibPoints[0][0].x, \
-            self.calibPoints[0][0].y]).T
-        regPts = numpy.mat([self.calibPoints[0][1].x, \
-            self.calibPoints[0][1].y]).T
-        for ptPair in self.calibPoints:
-            mapPts = numpy.hstack([mapPts, \
-                numpy.mat([ptPair[0].x, ptPair[0].y]).T])
-            regPts = numpy.hstack([regPts, \
-                numpy.mat([ptPair[1].x, ptPair[1].y]).T])
-        
-        # Shearing allows for the scaling of dimensions independently
-        # (does not keep the aspect ratio) but also skews angles and such
-        # if the points chosen are not perfect
-        allowShear = not self.chkbxShear.IsChecked()
-        
-        # Get tranformation matrix such that
-        # regPt = T * mapPt
-        T = _transformations.affine_matrix_from_points(mapPts, regPts, \
-            shear=allowShear)
-        
-        # Apply transformation to all region points
-        # TODO: Add this to undo in regionEditor somehow
-        for reg in self.parent.regions:
-            for pt in reg.verts:
-                ptMat = numpy.mat([pt.x, pt.y, 1.0]).T
-                newPtMat = T * ptMat
-                pt.Set(float(newPtMat[0]), float(newPtMat[1]))
-        self.parent.RedrawCanvas()
-        
-        # Quit calibration
-        self.OnClose(None)
-
-    def OnMenuExit(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        self.OnClose(None)
-
-    def OnMenuUndo(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnMenuUndo' not implemented!"
-        event.Skip()
-
-    def OnMenuRedo(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnMenuRedo' not implemented!"
-        event.Skip()
-
-    def OnMenuSelectAll(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnMenuSelectAll' not implemented!"
-        event.Skip()
-
-    def OnMenuClearAll(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnMenuClearAll' not implemented!"
-        event.Skip()
-
-    def OnMenuShowMarkers(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        # Switch Vicon streaming on or off based on state of menu checkbox
-        if self.menuShowMarkers.IsChecked():
-            self.toggleVicon.SetValue(True)
-            self.viconListener.start()
-        else:
-            self.viconListener.stop()
-            # Reinitialize thread to enable restarting it
-            self.viconListener = ViconMarkerListener(self)
-            self.toggleVicon.SetValue(False)
-
-    def OnMenuClearMarkers(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        if self.menuShowMarkers.IsChecked():
-            self.toggleVicon.SetValue(False)
-            self.menuShowMarkers.Check(False)
-            self.viconListener.stop()
-            self.viconListener = ViconMarkerListener(self)
-            time.sleep(0.1)
-        self.markerPoses = []
-        self.RedrawVicon()
-
-    def OnMenuLoadImage(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnMenuLoadImage' not implemented!"
-        event.Skip()
-    
-    def OnMenuDimen(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "OnMenuDimen"
-        event.Skip()
-
-    def OnMenuClearImage(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnMenuClearImage' not implemented!"
-        event.Skip()
-
-    def OnMenuHowTo(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnMenuHowTo' not implemented!"
-        event.Skip()
-
-    def OnMenuAbout(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnMenuAbout' not implemented!"
-        event.Skip()
-
-    def OnToggleVicon(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        # Switch Vicon streaming on or off based on state of toggle button
-        if self.toggleVicon.GetValue():
-            self.menuShowMarkers.Check(True)
-            self.viconListener.start()
-        else:
-            self.viconListener.stop()
-            # Reinitialize thread to enable restarting it
-            self.viconListener = ViconMarkerListener(self)
-            self.menuShowMarkers.Check(False)
-
-    def OnButtonImage(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnButtonImage' not implemented!"
-        event.Skip()
-    
-    def OnToggleAddPoint(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        self.ResetToggles(toggleKeep=self.toggleAddPoint)
-        # TODO: When menu items are added for add point, flip on here
-    
-    def OnToggleDeletePoint(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        self.ResetToggles(toggleKeep=self.toggleDeletePoint)
-        # TODO: When menu items are added for delete point, flip on here
-
-    def OnButtonEnterPoint(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnButtonEnterPoint' not implemented"
-        event.Skip()
-
-    def OnToggleDimen(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "Event handler `OnToggleDimen' not implemented"
-        event.Skip()
-    
-    def OnButtonSave(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        self.OnMenuSave(None)
-    
-    def OnMapMouseLeftDown(self, event):
-        """Save downclick point on map for future use."""
-        self.mapLeftClickPt, iCalibPt, iReg = \
-            self.SnapPointMap(self.MapPix2M(event.GetPosition()))
-    
-    def OnMapMouseLeftUp(self, event):
-        """React to the finalization of the left click on the map."""
-        ptPix = event.GetPosition()
-        pt, iCalibPt, iReg = \
-            self.SnapPointMap(self.MapPix2M(ptPix))
-        
-        # Creating a calibration point
-        if self.toggleAddPoint.GetValue() and iCalibPt == -1:
-            # First point clicked for adding new point
-            if not self.newCalibPt[1]:
-                self.newCalibPt[0] = pt
-                self.RedrawMap()
-            
-            # Finalizing calibration point (second point clicked)
-            else:
-                self.calibPoints.append([pt, self.newCalibPt[1]])
-                self.newCalibPt = [None, None]
-                self.Redraw()
-        
-        # Removing a calibration point
-        elif self.toggleDeletePoint.GetValue() and iCalibPt != -1:
-            self.calibPoints.pop(iCalibPt)
-            self.Redraw()
-        
-        # Panning the map view
-        elif pt.Dist(self.mapLeftClickPt) > self.mapTolerance:
-            downClickPix = self.MapM2Pix(self.mapLeftClickPt)
-            self.mapOffset = Point(self.mapScale.x * \
-                (downClickPix[0] - ptPix[0]) + self.mapOffset.x, \
-                self.mapScale.y * (downClickPix[1] - ptPix[1]) + \
-                self.mapOffset.y)
-            self.RedrawMap()
-    
-    def OnMapMouseWheel(self, event):
-        """Zoom on the map."""
-        ptPix = event.GetPosition()
-        rot = event.GetWheelRotation()          # Usually +/- multiple of 120
-        scaler = 0.75 ** (rot / 120)            # Zoom in to 75% per scroll
-        # Keep mouse on the same point after zooming
-        # pt = ptPix * scale + offset
-        # pt = ptPix * scaleNew + offsetNew
-        self.mapOffset = Point(float(ptPix[0]) * self.mapScale.x * \
-            (1 - scaler) + self.mapOffset.x, float(ptPix[1]) * \
-            self.mapScale.y * (1 - scaler) + self.mapOffset.y)
-        self.mapScale = self.mapScale * scaler
-        self.RedrawMap()
-    
-    def OnMapEnterWindow(self, event):
-        """Set focus on map to enable zooming."""
-        self.map.SetFocus()
-        self.RedrawMap()
-    
-    def OnMapLeaveWindow(self, event):
-        """Return focus to main GUI."""
-        self.SetFocus()
-    
-    def OnRefMouseLeftDown(self, event):
-        """Save downclick point on reference panel for future use."""
-        self.refLeftClickPt, iCalibPt, iReg = \
-            self.SnapPointMap(self.RefPix2M(event.GetPosition()))
-    
-    def OnRefMouseLeftUp(self, event):
-        """React to the finalization of the left click on the map."""
-        ptPix = event.GetPosition()
-        pt, iCalibPt = \
-            self.SnapPointRef(self.RefPix2M(ptPix))
-        
-        # Creating a calibration point
-        if self.toggleAddPoint.GetValue() and iCalibPt == -1:
-            # First point clicked for adding new point
-            if not self.newCalibPt[0]:
-                self.newCalibPt[1] = pt
-                self.RedrawMap()
-            
-            # Finalizing calibration point (second point clicked)
-            else:
-                self.calibPoints.append([self.newCalibPt[0], pt])
-                self.newCalibPt = [None, None]
-                self.Redraw()
-        
-        # Removing a calibration point
-        elif self.toggleDeletePoint.GetValue() and iCalibPt != -1:
-            self.calibPoints.pop(iCalibPt)
-            self.Redraw()
-        
-        # Panning the reference view
-        elif pt.Dist(self.refLeftClickPt) > self.refTolerance:
-            downClickPix = self.RefM2Pix(self.refLeftClickPt)
-            self.refOffset = Point(self.refScale.x * \
-                (downClickPix[0] - ptPix[0]) + self.refOffset.x, \
-                self.refScale.y * (downClickPix[1] - ptPix[1]) + \
-                self.refOffset.y)
-            self.RedrawRef()
-    
-    def OnRefMouseWheel(self, event):
-        """Zoom on the reference panel."""
-        ptPix = event.GetPosition()
-        rot = event.GetWheelRotation()          # Usually +/- multiple of 120
-        scaler = 0.75 ** (rot / 120)            # Zoom in to 75% per scroll
-        # Keep mouse on the same point after zooming
-        # pt = ptPix * scale + offset
-        # pt = ptPix * scaleNew + offsetNew
-        self.refOffset = Point(float(ptPix[0]) * self.refScale.x * \
-            (1 - scaler) + self.refOffset.x, float(ptPix[1]) * \
-            self.refScale.y * (1 - scaler) + self.refOffset.y)
-        self.refScale = self.refScale * scaler
-        self.RedrawRef()
-    
-    def OnRefEnterWindow(self, event):
-        """Set focus on reference panel to enable zooming."""
-        self.ref.SetFocus()
-        self.RedrawRef()
-    
-    def OnRefLeaveWindow(self, event):
-        """Return focus to main GUI."""
-        self.SetFocus()
-    
-    def OnKeyDown(self, event):
-        print "OnKeyDown"
-        event.Skip()
-    
-    def Redraw(self):
-        """Redraw map and reference panels."""
-        self.RedrawMap()
-        self.RedrawRef()
-    
-    def RedrawMap(self):
-        """Redraw the map panel."""
-        # Clear map
-        self.map.ClearBackground()
-        
-        # Create device context
-        windc = wx.WindowDC(self.map)
-        dc = wx.GCDC(windc)
-        self.map.PrepareDC(dc)
-        dc.BeginDrawing()
-        
-        # Redraw all regions
-        for region in self.parent.regions:
-            self.DrawRegion(region, dc=dc)
-        
-        # Draw calibration points
-        for iPtPair, ptPair in enumerate(self.calibPoints):
-            self.DrawCalibPoint(self.MapM2Pix(ptPair[0]), str(iPtPair), dc)
-        
-        # Draw single point from currently being made calibration point
-        if self.newCalibPt[0]:
-            self.DrawCalibPoint(self.MapM2Pix(self.newCalibPt[0]), "", dc)
-        
-        dc.EndDrawing()
-    
-    def RedrawRef(self):
-        """Redraw the reference panel."""
-        # Clear ref
-        self.ref.ClearBackground()
-        
-        # Create device context
-        windc = wx.WindowDC(self.ref)
-        dc = wx.GCDC(windc)
-        self.ref.PrepareDC(dc)
-        dc.BeginDrawing()
-        
-        # TODO: Draw background image
-        
-        # Draw calibration points
-        for iPtPair, ptPair in enumerate(self.calibPoints):
-            self.DrawCalibPoint(self.RefM2Pix(ptPair[1]), str(iPtPair), dc)
-        
-        # Draw single point from currently being made calibration point
-        if self.newCalibPt[1]:
-            self.DrawCalibPoint(self.RefM2Pix(self.newCalibPt[1]), "", dc)
-        
-        # Draw markers
-        dc.SetBrush(wx.Brush(wx.Colour(255, 255, 255, 128), wx.SOLID))
-        dc.SetPen(wx.Pen(wx.Colour(0, 0, 0, 125), 1, wx.SOLID))
-        for pt in self.markerPoses:
-            ptPix = self.RefM2Pix(pt)
-            dc.DrawCircle(ptPix[0], ptPix[1], 4)
-        
-        dc.EndDrawing()
-    
-    def RedrawVicon(self):
-        # TODO: Redraw saved image of background since it is faster and 
-        #       vicon needs to be redrawn at a high frequency
-        self.RedrawRef()
-    
-    def DrawRegion(self, region, dc):
-        """Draw a single region.
-
-        region - Instance of Region class, contains information about the region.
-        dc - Device context used for drawing on the panel.
-        """
-        # Set brush to region color
-        isBoundary = region.name.lower() == "boundary"
-        if isBoundary:
-            dc.SetBrush(wx.Brush(region.color, wx.TRANSPARENT))
-            dc.SetPen(wx.Pen(wx.BLACK, 3, wx.SOLID))
-        elif region.isObstacle:
-            obstColor = wx.Colour(region.color.Red() / 10, \
-                region.color.Green() / 10, region.color.Blue() / 10, 128)
-            dc.SetBrush(wx.Brush(obstColor, wx.SOLID))
-            dc.SetPen(wx.Pen(region.color, 1, wx.SOLID))
-        else:
-            innerColor = wx.Colour(region.color.Red(), region.color.Green(), \
-                region.color.Blue(), 128)
-            dc.SetBrush(wx.Brush(innerColor, wx.SOLID))
-            dc.SetPen(wx.Pen(region.color, 1, wx.SOLID))
-        dc.SetTextForeground(wx.BLACK)
-        dc.SetBackgroundMode(wx.TRANSPARENT)
-        dc.SetFont(wx.Font(10, wx.FONTFAMILY_SWISS, wx.NORMAL, wx.BOLD, False))
-        
-        # Set up label
-        if region.isObstacle:
-            labelText = "(%s)" % region.name
-        else:
-            labelText = region.name
-        labelWidth, labelHeight = dc.GetTextExtent(labelText)
-        
-        # Draw region
-        vertsPix = []
-        xLabelPix = 0
-        yLabelPix = 0
-        for vert in region.verts:
-            vertPix = self.MapM2Pix(vert)
-            vertsPix.append(vertPix)
-            if not isBoundary:          # Put label in center
-                xLabelPix += vertPix[0]
-                yLabelPix += vertPix[1]
-            else:                       # Put label in lower right corner
-                xLabelPix = max(xLabelPix, vertPix[0])
-                yLabelPix = max(yLabelPix, vertPix[1])
-        dc.DrawPolygon(vertsPix)
-        if isBoundary:
-            xLabelPix = xLabelPix - labelWidth
-        else:
-            xLabelPix = xLabelPix / len(region.verts) - labelWidth / 2
-            yLabelPix = yLabelPix / len(region.verts) - labelHeight / 2
-        
-        # Draw label
-        if not isBoundary:
-            dc.SetBrush(wx.Brush(region.color, wx.SOLID))
-            dc.DrawRoundedRectangle(xLabelPix - 5, yLabelPix - 3, \
-                labelWidth + 10, labelHeight + 6, 3)
-        dc.DrawText(labelText, xLabelPix, yLabelPix)
-    
-    def DrawCalibPoint(self, ptPix, label, dc):
-        """Draw a single calibration point.
-        
-        ptPix - Point to draw with coordinates in pixels
-        label - String to label point with - usually point index
-                If label is empty, point will be drawn in a differnt color
-        dc - Device context that allows for drawing
-        """
-        # Draw circle
-        radius = 5
-        if label:
-            innerColor = wx.RED
-        else:
-            innerColor = wx.GREEN
-        dc.SetBrush(wx.Brush(innerColor, wx.SOLID))
-        dc.SetPen(wx.Pen(wx.BLACK, 1, wx.SOLID))
-        dc.DrawCircle(ptPix[0], ptPix[1], radius)
-        
-        # Draw label
-        if label:
-            dc.SetTextForeground(wx.BLACK)
-            dc.SetBackgroundMode(wx.TRANSPARENT)
-            dc.SetFont(wx.Font(8, wx.FONTFAMILY_SWISS, wx.NORMAL, wx.BOLD, False))
-            labelWidth, labelHeight = dc.GetTextExtent(label)
-            xLabelPix = ptPix[0] - radius
-            yLabelPix = ptPix[1] - radius
-            dc.DrawText(label, xLabelPix, yLabelPix)
-    
-    def ResetToggles(self, toggleKeep=None):
-        """Unpress toggle buttons except that specified. Reset calibration
-        point creation. Redraw the panels.
-        
-        toggleKeep - Toggle button to retain the value of
-        """
-        # Reset toggles
-        valueKeep = toggleKeep.GetValue()
-        self.toggleAddPoint.SetValue(False)
-        self.toggleDeletePoint.SetValue(False)
-        self.toggleDimen.SetValue(False)
-        toggleKeep.SetValue(valueKeep)
-        
-        # Reset partial calibration point creation
-        self.newCalibPt = [None, None]
-        
-        # Redraw the map and reference panels
-        self.Redraw()
-    
-    def SnapPointMap(self, pt):
-        """Snap the point to the closest calibration point, region vertex, or
-        region edge from the map panel.
-        
-        pt - Point to snap in absolute coordinates
-        returns - (snappedPt, idxCalibPt, idxReg)
-            snappedPt - Point after snapping, in absolute coordinates
-            idxCalibPt - Index of snapped-to calibration point
-                       (-1 if not snapped to calibration point)
-            idxReg - Index of region snapped-to (-1 if not snapped to region)
-        """
-        # Check calibration points first
-        snapped = False
-        pt, idxCalibPt, snapped = \
-            self.SnapCalibPoints(pt, 0, snapped=snapped)
-        
-        # Check regions next
-        pt, idxReg, idxRPoint, idxREdge, snapped = \
-            self.parent.SnapRegions(pt, snapped=snapped)
-        
-        return pt, idxCalibPt, idxReg
-    
-    def SnapPointRef(self, pt):
-        """Snap the point to the closest calibration point or marker from the
-        reference panel.
-        
-        pt - Point to snap in absolute coordinates
-        returns - (snappedPt, iCalibPt, iReg)
-            snappedPt - Point after snapping, in absolute coordinates
-            idxCalibPt - Index of snapped-to calibration point
-                       (-1 if not snapped to calibration point)
-        """
-        # Check calibration points first
-        snapped = False
-        pt, idxCalibPt, snapped = \
-            self.SnapCalibPoints(pt, 1, snapped=snapped)
-        
-        # Check marker points next
-        pt, snapped = self.SnapVicon(pt, snapped=snapped)
-        
-        return pt, idxCalibPt
-    
-    def SnapCalibPoints(self, pt, idxPanel, snapped=False):
-        """Snap the point to the first sufficiently close calibration point in
-        the specified panel.
-        
-        pt - Point to be snapped in absolute coordinates
-        idxPanel - 0 indicating map panel, 1 indicating reference panel
-        snapped - Boolean, whether point has been snapped already
-                  If snapped was true in input, then function will immediately
-                  return, setting the same value to the output snapped
-        returns - (snappedPt, idxCalibPt, snapped)
-            snappedPt - Point after snapping, in absolute coordinates
-            idxCalibPt - Index of snapped-to calibration point
-                         (-1 if not snapped to calibration point)
-            snapped - Boolean indicating if the point has ever been snapped
-        """
-        # Set tolerance in absolute coordinates
-        if idxPanel == 0:
-            tol = self.mapTolerance
-        else:
-            tol = self.refTolerance
-        
-        # Check through all calibration points until snapping
-        idxCalibPt = -1
-        iCPt = len(self.calibPoints) - 1
-        while not snapped and iCPt > -1:
-            if pt.Dist(self.calibPoints[iCPt][idxPanel]) < tol:
-                pt = self.calibPoints[iCPt][idxPanel]
-                idxCalibPt = iCPt
-                snapped = True
-            iCPt -= 1
-        
-        return copy.copy(pt), idxCalibPt, snapped
-    
-    def SnapVicon(self, pt, snapped=False):
-        """Snap the given point to any sufficiently close marker point.
-        
-        pt - Point to be snapped, in absolute coordinates
-        snapped - Boolean, indicates if point has already been snapped
-                  If snapped was true in input, then function will immediately
-                  return, setting the same value to the output snapped
-        returns - (snappedPt, snapped)
-            snappedPt - Point after snapping
-            snapped - Boolean, indicates if point has ever been snapped
-        """
-        # Check all points until snapped
-        iVPt = 0
-        while not snapped and iVPt < len(self.markerPoses):
-            if pt.Dist(self.markerPoses[iVPt]) < self.refTolerance:
-                pt = copy.copy(self.markerPoses[iVPt])
-                snapped = True
-            iVPt += 1
-        
-        return copy.copy(pt), snapped
-    
-    def MapM2Pix(self, pose):
-        """Convert from absolute (meter) coordinates to pixel coordinates for
-        the map panel.
-        
-        pose - Point, absolute coordinates of point
-        returns - Tuple, pixel coordinates in canvas panel (col, row)
-        """
-        col = int((pose.x - self.mapOffset.x) / self.mapScale.x)
-        row = int((pose.y - self.mapOffset.y) / self.mapScale.y)
-        return (col, row)
-    
-    def MapPix2M(self, pixPose):
-        """Convert from pixel coordinates to absolute (meter) coordinates for
-        the map panel.
-        
-        pixPose - Tuple, pixel coordinates in canvas panel (col, row)
-        returns - Point, absolute coordinates of point
-        """
-        x = float(pixPose[0]) * self.mapScale.x + self.mapOffset.x
-        y = float(pixPose[1]) * self.mapScale.y + self.mapOffset.y
-        return Point(x, y)
-    
-    def RefM2Pix(self, pose):
-        """Convert from absolute (meter) coordinates to pixel coordinates for
-        the reference panel.
-        
-        pose - Point, absolute coordinates of point
-        returns - Tuple, pixel coordinates in canvas panel (col, row)
-        """
-        col = int((pose.x - self.refOffset.x) / self.refScale.x)
-        row = int((pose.y - self.refOffset.y) / self.refScale.y)
-        return (col, row)
-    
-    def RefPix2M(self, pixPose):
-        """Convert from pixel coordinates to absolute (meter) coordinates for
-        the reference panel.
-        
-        pixPose - Tuple, pixel coordinates in canvas panel (col, row)
-        returns - Point, absolute coordinates of point
-        """
-        x = float(pixPose[0]) * self.refScale.x + self.refOffset.x
-        y = float(pixPose[1]) * self.refScale.y + self.refOffset.y
-        return Point(x, y)
-# end of class CalibrationFrame
-
-class Region:
-    def __init__(self, points=[], name="", holes=[], rgb=None, obst=False):
-        """Create an object to represent a region.
-
-        points - List of Points containing vertex information
-                 [Point(x1, y1), Point(x2, y2), ...]
-        name - String defining region name
-        holes - List of lists of points representing holes cut in the region
-        rgb - List of integers defining color
-              [red, green, blue], each with value in range [0 255]
-        obst - Boolean, True indicates that the region is an obstacle
-        """
-        # TODO: Add convex/concave
-        self.verts = points
-        self.name = name
-        self.holeList = holes
-        if not rgb:
-            rgb = [random.randint(0, 255), random.randint(0, 255), \
-                random.randint(0,255)]
-        self.color = wx.Colour(rgb[0], rgb[1], rgb[2])
-        self.isObstacle = obst
-    
-    def __str__(self):
-        """Representation of object."""
-        s = "%s\t{%03d\t%03d\t%03d}\t[" % (self.name, self.color.Red(), \
-            self.color.Green(), self.color.Blue())
-        for iPt, pt in enumerate(self.verts):
-            s += str(pt)
-            if iPt < len(self.verts) - 1:
-                s += "\t"
-        s += "]"
-        return s
-    
-    def getData(self):
-        """Return a copy of the object's internal data.
-        This is used to save this region to disk.
-        """
-
-        data = {'name': self.name, 'color': (self.color.Red(), \
-            self.color.Green(), self.color.Blue())}
-        
-        data['points'] = [(pt.x, pt.y) for pt in self.verts]
-        
-        data['holeList'] = []
-        for hole in self.holeList:
-            data['holeList'].append([(pt.x, pt.y) for pt in hole])
-
-        data['isObstacle'] = self.isObstacle
-
-        return data
-
-    def setData(self, data):
-        """Set the object's internal data.
-        
-        'data' is a copy of the object's saved data, as returned by
-        getData() above. This is used to restore a previously saved region.
-        """
-        
-        self.name = data['name']
-        self.color = wx.Colour(*data['color'])
-        
-        self.verts = [Point(*pt) for pt in data['points']]
-        
-        if 'holeList' in data:
-            self.holeList = []
-            for hole in data['holeList']:
-                self.holeList.append([Point(*pt) for pt in hole])
-        
-        if 'isObstacle' in data:
-            self.isObstacle = data['isObstacle']
-    
-    def PtInRegion(self, pt):
-        """Check if a point is inside of the region.
-        Algorithm taken from C# version of Solution 1 from
-        http://local.wasp.uwa.edu.au/~pbourke/geometry/insidepoly/
-        
-        pt - Point to check
-        returns - Boolean, True if the point is inside of the region
-        """
-        result = False
-        n = len(self.verts)
-        for i in range(n):
-            j = (i + 1) % n
-            if ((self.verts[j].y <= pt.y and pt.y < self.verts[i].y) or \
-                    (self.verts[i].y <= pt.y and pt.y < self.verts[j].y)) and \
-                    pt.x < (self.verts[i].x - self.verts[j].x) * \
-                    (pt.y - self.verts[j].y) / \
-                    (self.verts[i].y - self.verts[j].y) + self.verts[j].x:
-                result = not result
-        return result
-# end of class Region
-
 
 class Action:
     def __init__(self, regions, adjacent):
@@ -2690,262 +2113,6 @@ class Action:
 # end of class Action
 
 
-class Point:
-    def __init__(self, x, y):
-        """Create an object that allows floating point vector operations.
-
-        x - Float, first coordinate of point
-        y - Float, second coordinate of point
-        """
-        if isinstance(x, float) and isinstance(y, float):
-            self.x = x
-            self.y = y
-        else:
-            raise TypeError('\'Point\' creation takes only \'float\' values')
-
-    def __str__(self):
-        """Representation of object."""
-        return '(%.3f\t%.3f)' % (self.x, self.y)
-
-    def __hash__(self):
-        """Hashtable representation of object."""
-        tup = (self.x, self.y)
-        return tup.__hash__()
-
-    def __eq__(self, other):
-        """Checks equality (self == other)."""
-        return isinstance(other, Point) and self.x == other.x and self.y == other.y
-
-    def __ne__(self, other):
-        """Checks non-equality (self != other)."""
-        return not self.__eq__(other)
-
-    def __add__(self, other):
-        """Addition operator (self + other)."""
-        if isinstance(other, Point):
-            return Point(self.x + other.x, self.y + other.y)
-        elif isinstance(other, tuple) and len(other) == 2:
-            return Point(self.x + other[0], self.y + other[1])
-        else:
-            raise TypeError('cannot add \'Point\' and \'' + \
-                other.__class__.__name__ + '\' objects')
-
-    def __radd__(self, other):
-        """Right addition operator (other + self)."""
-        return self.__add__(other)
-
-    def __sub__(self, other):
-        """Subtraction operator (self - other)."""
-        if isinstance(other, Point):
-            return Point(self.x - other.x, self.y - other.y)
-        elif isinstance(other, tuple) and len(other) == 2:
-            return Point(self.x - other[0], self.y - other[1])
-        else:
-            raise TypeError('cannot subtract \'Point\' and \'' + \
-                other.__class__.__name__ + '\' objects')
-
-    def __rsub__(self, other):
-        """Right subtraction operator (other - self)."""
-        if isinstance(other, Point):
-            return Point(other.x - self.x, other.y - self.y)
-        elif isinstance(other, tuple) and len(other) == 2:
-            return Point(other[0] - self.x, other[1] - self.y)
-        else:
-            raise TypeError('cannot subtract \'Point\' and \'' + \
-                other.__class__.__name__ + '\' objects')
-
-    def __mul__(self, other):
-        """Multiplication operator (self * other)."""
-        if isinstance(other, float):
-            return Point(self.x * other, self.y * other)
-        else:
-            raise TypeError('cannot multiply \'Point\' and \'' + \
-                other.__class__.__name__ + '\' objects')
-
-    def __rmul__(self, other):
-        """Right multiplication operator (other * self)."""
-        return self.__mul__(other)
-
-    def __div__(self, other):
-        """Division operator (self / other)."""
-        if isinstance(other, float):
-            return Point(self.x / other, self.y / other)
-        else:
-            raise TypeError('cannot divide \'Point\' and \'' + \
-                other.__class__.__name__ + '\' objects')
-
-    def __truediv__(self, other):
-        """True division operator."""
-        return self.__div__(other)
-    
-    def Set(self, x, y):
-        """Change the value of the point."""
-        self.x = x
-        self.y = y
-
-    def Dot(self, other):
-        """Dot product."""
-        if isinstance(other, Point):
-            return self.x * other.x + self.y * other.y
-        elif isinstance(other, tuple) and len(other) == 2:
-            return self.x * other[0] + self.y * other[1]
-        else:
-            raise TypeError('cannot compute dot product of \'Point\' and \'' + \
-                other.__class__.__name__ + '\' object')
-
-    def Dist(self, other):
-        """Euclidean distance from this point to the other."""
-        if isinstance(other, Point):
-            return math.sqrt((self.x - other.x) ** 2 + \
-                (self.y - other.y) ** 2)
-        elif isinstance(other, tuple) and len(other) == 2:
-            return math.sqrt((self.x - other[0]) ** 2 + \
-                (self.y - other[1]) ** 2)
-        else:
-            raise TypeError('cannot compute distance from \'Point\' to \'' + \
-                other.__class__.__name__ + '\' object')
-
-    def Norm(self):
-        """Length of the vector."""
-        return math.sqrt(self.x ** 2 + self.y ** 2)
-# end of class Point
-
-
-class ViconMarkerListener(threading.Thread):
-    def __init__(self, parent):
-        """Create the a socket to receive Vicon data."""
-        super(ViconMarkerListener, self).__init__()
-
-        # Communication parameters
-        self.parent = parent        # regionEditor or CalibrationFrame
-        self.addr = ("0.0.0.0", 7500)
-        self.bufsize = 65536
-        self.udpSock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.lock = threading.Lock()
-        self.close = threading.Event()
-        self.updateFreq = 20    # Hz
-
-        # Tracking parameters
-        # TODO: Set all paremeters in configuration of GUI
-        self.minDist = 0.01     # Distance to move to qualify as movement
-        self.maxDist = 0.1      # Qualified as new point
-        self.movMaxTime = 15 * self.updateFreq  # (sec)*(Hz)
-                                # Iterations during which marker is not moving
-                                # before stopping tracking
-        self.invMaxTime = 1 * self.updateFreq   # (sec)*(Hz)
-                                # Iterations during which marker is not found
-                                # before stopping tracking
-
-        # Tracking containers
-        self.oldPoses = []      # Previous marker positions
-        self.movingPoses = []   # Markers that are moving
-        self.movingTimeout = [] # Iterations left before movement timeout
-        self.invisTimeout = []  # Iteractions left before not-found timeout
-
-    def run(self):
-        """Open the socket to start communication. Process messages."""
-        # Open socket for communication
-        self.udpSock.bind(self.addr)
-
-        # Receive communication until stopped
-        self.close.clear()
-        delay = 1 / self.updateFreq
-        while not self.close.isSet():
-            self.lock.acquire()
-            data = self.udpSock.recv(self.bufsize)
-            self.lock.release()
-            self.ProcessData(data)
-            time.sleep(delay)
-
-        # Close socket
-        self.udpSock.close()
-        self.oldPoses = []
-        self.movingPoses = []
-        self.movingTimeout = []
-        self.invisTimeout = []
-
-    def stop(self):
-        """Close the socket to end UDP communication."""
-        self.close.set()
-
-    # Deserialize and save data
-    def ProcessData(self, data):
-        """Extract marker positions and pass them on to be mapped.
-
-        data - Byte array encoded from multiple pairs of doubles [x1 y1 ...]
-        """
-        # Check for valid data (not null or incomplete)
-        if data and len(data)%16 == 0:
-            poses = []
-            for i in range(0, len(data), 16):
-                x, y = struct.unpack('dd', data[i:i+16])
-                poses.append(Point(x, y))
-            # Save and plot marker positions
-            # Both regionEditor GUI and CalibrationFrame GUI have
-            # markerPoses field and RedrawVicon method
-            self.parent.markerPoses = poses
-            self.UpdateMovingMarkers(poses)
-            self.parent.RedrawVicon()      # Force map redraw
-
-    def UpdateMovingMarkers(self, poses):
-        """Note which markers are newly moving and update position of old
-        moving markers based on change in position from previous list.
-
-        poses - List of Points, marker positions.
-        """
-        # Not first time through
-        if self.oldPoses:
-            # Check all currently tracked markers first
-            for iMarker, markerPose in enumerate(self.movingPoses):
-                closestIdx = self.FindClosest(poses, markerPose)
-                closestDist = markerPose.Dist(poses[closestIdx])
-                # Same marker
-                if closestDist < self.maxDist:
-                    self.invisTimeout[iMarker] = self.invMaxTime
-                    # Is moving
-                    if closestDist > self.minDist:
-                        self.movingTimeout[iMarker] = self.movMaxTime + 1
-                    self.movingPoses[iMarker] = poses[closestIdx]
-                # Marker not seen
-                else:
-                    self.invisTimeout[iMarker] -= 1
-                self.movingTimeout[iMarker] -= 1
-                # Marker has stopped moving or not been seen for some time
-                if self.invisTimeout[iMarker] == 0 or \
-                        self.movingTimeout[iMarker] == 0:
-                    self.invisTimeout.pop(iMarker)
-                    self.movingTimeout.pop(iMarker)
-                    self.movingPoses.pop(iMarker)
-            # Check through all new markers next
-            for markerPose in poses:
-                closestIdx = self.FindClosest(self.oldPoses, markerPose)
-                closestDist = markerPose.Dist(self.oldPoses[closestIdx])
-                # Point is moving
-                if closestDist < self.maxDist and closestDist > self.minDist:
-                    self.movingPoses.append(markerPose)
-                    self.movingTimeout.append(self.movMaxTime)
-                    self.invisTimeout.append(self.invMaxTime)
-        self.oldPoses = poses
-
-    def FindClosest(self, points, target):
-        """Find the closest point to the target.
-
-        points - List of Points, marker positions.
-        target - Point, point to find marker closest to.
-        returns - Integer, index of closest point in points.
-        """
-        # Iterate through all points
-        minDist = float('inf')
-        minIdx = 0
-        for i, pt in enumerate(points):
-            dist = target.Dist(pt)
-            if dist < minDist:
-                minIdx = i
-                minDist = dist
-        return minIdx
-# end of class ViconMarkerListener
-
-
 class AudioFeedbackThread(threading.Thread):
     def __init__(self, feedbackDialog, regEditor):
         """Create audio feedback for marker placement.
@@ -2958,6 +2125,21 @@ class AudioFeedbackThread(threading.Thread):
         # Save other objects
         self.fbDia = feedbackDialog
         self.regEd = regEditor
+        
+        # Keep track of Vicon settings before opening this
+        hadMarkers = len(self.regEd.markerPoses) > 0
+        wasStreaming = self.regEd.toggleVicon.GetValue()
+        wasTracking = self.regEd.viconListener.trackMarkers
+        self.oldSettings = (hadMarkers, wasStreaming, wasTracking)
+        
+        # Start Vicon streaming if necessary
+        if not self.regEd.toggleVicon.GetValue():
+            self.regEd.toggleVicon.SetValue(True)
+            # TODO: Also check menu item
+            self.regEd.viconListener.start()
+        
+        # Tell marker listener to track the moving markers
+        self.regEd.viconListener.trackMarkers = True
         
         # Non-audio parameters
         self.close = threading.Event()
@@ -2991,7 +2173,7 @@ class AudioFeedbackThread(threading.Thread):
             if not self.fbDia.chkbxMute.GetValue():
                 # Get distance from closest marker to point of interest
                 intPt = self.regEd.regions[self.fbDia.currReg].\
-                    verts[self.fbDia.currPt]
+                    pointArray[self.fbDia.currPt]
                 minStatDistToPt = 2.0 * self.maxDist
                 for statPt in self.regEd.markerPoses:
                     if not statPt in self.regEd.viconListener.movingPoses:
@@ -3008,15 +2190,13 @@ class AudioFeedbackThread(threading.Thread):
                         minPtIdx = iPt
 
                 # Plot moving point and goal point
-                dc = wx.WindowDC(self.regEd.canvas)
-                dc.SetBrush(wx.Brush(wx.Colour(255, 0, 0, 100), wx.SOLID))
-                posePix = self.regEd.Map2Pix(intPt)
-                dc.DrawCircle(posePix[0], posePix[1], 8)
+                poses = [intPt]
                 if minPtIdx > -1 and minPtIdx < \
                         len(self.regEd.viconListener.movingPoses):
-                    posePix = self.regEd.Map2Pix(\
+                    poses.append( \
                         self.regEd.viconListener.movingPoses[minPtIdx])
-                    dc.DrawCircle(posePix[0], posePix[1], 8)
+                self.regEd.feedbackPoses = poses
+                # Assume that this will be plotted with next Vicon redraw
 
                 # Close-enough
                 if minDistToPt < self.tolerance or \
@@ -3068,11 +2248,25 @@ class AudioFeedbackThread(threading.Thread):
                             (diffPt.x, diffPt.y))
                         self.engine.runAndWait()
                         time.sleep(self.speechPause)
-
+    
     def stop(self):
         """Signal for the thread to end."""
         self.engine.stop()
         self.close.set()
+        
+        # Reset to old settings
+        hadMarkers, wasStreaming, wasTracking = self.oldSettings
+        self.regEd.viconListener.trackMarkers = wasTracking
+        if not wasStreaming:
+            self.regEd.toggleVicon.SetValue(False)
+            # TODO: Change checkbox too
+            self.regEd.viconListener.stop()
+            if not hadMarkers:
+                time.sleep(1)   # Wait for Vicon listener to close
+                self.regEd.markerPoses = []
+        
+        # Clear poses for drawing
+        self.regEd.feedbackPoses = []
 
 
 if __name__ == "__main__":

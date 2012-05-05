@@ -412,7 +412,14 @@ class RegionFileInterface:
             compatMode = False
         except ValueError:
             compatMode = True
-
+        
+        # If we are not reading a decomposed file, assume that specEditor is
+        # requesting a read of the new file format produced by regionEditor
+        # Need to get the corner of the bounding box to offset all regions by
+        if not "_decomposed" in filename:
+            xOff = -min([float(pt[0]) for rd in rdata for pt in rd['points']])
+            yOff = -min([float(pt[1]) for rd in rdata for pt in rd['points']])
+            offsets = (xOff, yOff)
         for rd in rdata:
             newRegion = Region()
             if compatMode:
@@ -425,7 +432,7 @@ class RegionFileInterface:
                 # New file format has region points in absolute coordinates in
                 # real world units, and all regions are polygons
                 if not "_decomposed" in filename:
-                    rd = self.convertRegionDataNewToOld(rd)
+                    rd = self.convertRegionDataNewToOld(rd, offsets)
                 newRegion.setData(rd)
 
             self.regions.append(newRegion)
@@ -479,12 +486,16 @@ class RegionFileInterface:
 
         return True
     
-    def convertRegionDataNewToOld(self, rd):
+    def convertRegionDataNewToOld(self, rd, offsets):
         """
         Take in data on all the regions that was read in the new file format
         and convert it to data on the regions in the old format. Points will be
         scaled by 1000 (to get milimeter accuracy) and other fields that are
         unused in the new format will be set.
+        
+        rd - Single region data dictionary
+        offsets - Whole map offsets to avoid negative coordinates
+                  (xOffset, yOffset)
         """
         # name, position, size, color, type, points, holeList
         # name and color can stay the same
@@ -519,7 +530,8 @@ class RegionFileInterface:
                     for hole in rd['holeList'] for pt in hole]
         rdnew['points'] = points
         rdnew['holeList'] = holeList
-        rdnew['position'] = (leftMargin, topMargin)
+        xOff, yOff = offsets
+        rdnew['position'] = (leftMargin + xOff, topMargin + yOff)
         rdnew['size'] = (rightExtent, downExtent)
         
         return rdnew
