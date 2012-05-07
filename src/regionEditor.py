@@ -1594,9 +1594,18 @@ class regionEditor(wx.Frame):
                     regEdDia.textName.GetValue() not in \
                     [r.name for r in self.regions]:
                 self.AddToUndo()
+                oldName = reg.name
                 reg.name = regEdDia.textName.GetValue()
                 reg.color = regEdDia.colorPicker.GetColour()
                 reg.isObstacle = regEdDia.chkbxObst.GetValue()
+                # Boundary region should have no adjacencies
+                if reg.name.lower() == "boundary":
+                    for iOthReg in range(len(self.regions)):
+                        self.adjacent[iReg][iOthReg] = []
+                        self.adjacent[iOthReg][iReg] = []
+                # Recheck adjacencies if changed back from boundary
+                elif oldName.lower() == "boundary":
+                    self.RecalcAdjacency(iReg)
                 regEdDia.Destroy()
                 done = True
             # Non-unique name - needs to re-edit
@@ -1627,7 +1636,7 @@ class regionEditor(wx.Frame):
         region.
         
         iReg - Index of region of interest
-        iRegStart - Specifies to check reg against self.regions[iRegStart:]
+        iRegStart - Specifies to check iReg against self.regions[iRegStart:]
         """
         # Reset adjacency related to this region
         for iOthReg in range(len(self.regions)):
@@ -1673,8 +1682,9 @@ class regionEditor(wx.Frame):
             snapResults = self.SnapRegions(pt, checkAll=True)
             # Process the "nearness" information
             for othPt, iOthReg, iOthPt, iOthEd in snapResults:
-                # Ignore same region
-                if iOthReg == iReg:
+                # Ignore same region and boundary
+                if iOthReg == iReg or \
+                        self.regions[iOthReg].name.lower() == "boundary":
                     continue
                 
                 # Change region point location
@@ -1727,10 +1737,17 @@ class regionEditor(wx.Frame):
         """Automatically create region representing the boundary of the map."""
         if self.regions:
             minx, maxx, miny, maxy = self.GetMapBoundaries()
+            
             # Create region
             points = [Point(minx, maxy), Point(maxx, maxy), \
                 Point(maxx, miny), Point(minx, miny)]
             self.regions.append(Region(points, 'boundary'))
+            
+            # Add row and column to list of lists of lists that is adjacency
+            # even though boundary won't use it
+            self.adjacent.append([[] for col in xrange(len(self.adjacent))])
+            for row in self.adjacent:
+                row.append([])
         else:
             print "No regions defined, so no boundary created."
     
