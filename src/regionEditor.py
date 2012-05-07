@@ -494,12 +494,14 @@ class regionEditor(wx.Frame):
             
             obstacleRegions = [r.name for r in self.regions if r.isObstacle]
             
-            backgroundData = [self.backgroundFile] + self.backgroundPosition
-            
-            data = {"Background": backgroundData,
-                    "Regions": regionData,
+            data = {"Regions": regionData,
                     "Transitions": transitionData,
                     "Obstacles": obstacleRegions}
+            
+            if self.backgroundFile:
+                backgroundData = [self.backgroundFile] + \
+                    self.backgroundPosition
+                data['Background'] = backgroundData
 
             fileMethods.writeToFile(self.fileName, data, comments)
             self.isSaved = True
