@@ -54,14 +54,14 @@ class regionEditor(wx.Frame):
         self.menuDrawing = wx.Menu()
         self.menuAutobound = wx.MenuItem(self.menuDrawing, wx.NewId(), "Autoboundary", "", wx.ITEM_NORMAL)
         self.menuDrawing.AppendItem(self.menuAutobound)
-        self.menuRect = wx.MenuItem(self.menuDrawing, wx.NewId(), "Rectangle", "", wx.ITEM_NORMAL)
+        self.menuRect = wx.MenuItem(self.menuDrawing, wx.NewId(), "Rectangle", "", wx.ITEM_CHECK)
         self.menuDrawing.AppendItem(self.menuRect)
-        self.menuPoly = wx.MenuItem(self.menuDrawing, wx.NewId(), "Polygon", "", wx.ITEM_NORMAL)
+        self.menuPoly = wx.MenuItem(self.menuDrawing, wx.NewId(), "Polygon", "", wx.ITEM_CHECK)
         self.menuDrawing.AppendItem(self.menuPoly)
         self.menuDrawing.AppendSeparator()
-        self.menuAddPoint = wx.MenuItem(self.menuDrawing, wx.NewId(), "Add Point", "", wx.ITEM_NORMAL)
+        self.menuAddPoint = wx.MenuItem(self.menuDrawing, wx.NewId(), "Add Point", "", wx.ITEM_CHECK)
         self.menuDrawing.AppendItem(self.menuAddPoint)
-        self.menuRemPoint = wx.MenuItem(self.menuDrawing, wx.NewId(), "Remove Point", "", wx.ITEM_NORMAL)
+        self.menuRemPoint = wx.MenuItem(self.menuDrawing, wx.NewId(), "Remove Point", "", wx.ITEM_CHECK)
         self.menuDrawing.AppendItem(self.menuRemPoint)
         self.RegionEditor_menubar.Append(self.menuDrawing, "Drawing")
         self.menuView = wx.Menu()
@@ -87,15 +87,15 @@ class regionEditor(wx.Frame):
         self.RegionEditor_menubar.Append(self.helpmenu, "Help")
         self.SetMenuBar(self.RegionEditor_menubar)
         # Menu Bar end
-        self.sidebar = wx.Panel(self, -1)
-        self.toggleVicon = wx.ToggleButton(self.sidebar, -1, "Markers")
-        self.buttonImage = wx.Button(self.sidebar, -1, "Image")
-        self.toggleSquare = wx.ToggleButton(self.sidebar, -1, "Rect.")
-        self.togglePoly = wx.ToggleButton(self.sidebar, -1, "Polygon")
-        self.toggleDim = wx.ToggleButton(self.sidebar, -1, "Length")
-        self.buttonAutobound = wx.Button(self.sidebar, -1, "Boundary")
-        self.toggleFeedback = wx.ToggleButton(self.sidebar, -1, "Feedback")
-        self.buttonCal = wx.Button(self.sidebar, -1, "Calibrate")
+        self.topbar = wx.Panel(self, -1)
+        self.toggleVicon = wx.BitmapButton(self.topbar, -1, wx.NullBitmap)
+        self.buttonImage = wx.BitmapButton(self.topbar, -1, wx.NullBitmap)
+        self.toggleSquare = wx.BitmapButton(self.topbar, -1, wx.NullBitmap)
+        self.togglePoly = wx.BitmapButton(self.topbar, -1, wx.NullBitmap)
+        self.toggleDim = wx.BitmapButton(self.topbar, -1, wx.NullBitmap)
+        self.buttonAutobound = wx.BitmapButton(self.topbar, -1, wx.NullBitmap)
+        self.toggleFeedback = wx.BitmapButton(self.topbar, -1, wx.NullBitmap)
+        self.buttonCal = wx.BitmapButton(self.topbar, -1, wx.NullBitmap)
         self.canvas = wx.Panel(self, -1, style=wx.SUNKEN_BORDER | wx.TAB_TRAVERSAL)
 
         self.__set_properties()
@@ -118,13 +118,13 @@ class regionEditor(wx.Frame):
         self.Bind(wx.EVT_MENU, self.OnMenuImageImport, self.menuImageImport)
         self.Bind(wx.EVT_MENU, self.OnMenuImageClear, self.menuImageClear)
         self.Bind(wx.EVT_MENU, self.OnMenuAbout, self.menuAbout)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleVicon, self.toggleVicon)
+        self.Bind(wx.EVT_BUTTON, self.OnToggleVicon, self.toggleVicon)
         self.Bind(wx.EVT_BUTTON, self.OnButtonImage, self.buttonImage)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleSquare, self.toggleSquare)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnTogglePoly, self.togglePoly)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleDim, self.toggleDim)
+        self.Bind(wx.EVT_BUTTON, self.OnToggleSquare, self.toggleSquare)
+        self.Bind(wx.EVT_BUTTON, self.OnTogglePoly, self.togglePoly)
+        self.Bind(wx.EVT_BUTTON, self.OnToggleDim, self.toggleDim)
         self.Bind(wx.EVT_BUTTON, self.OnButtonAutobound, self.buttonAutobound)
-        self.Bind(wx.EVT_TOGGLEBUTTON, self.OnToggleFeedback, self.toggleFeedback)
+        self.Bind(wx.EVT_BUTTON, self.OnToggleFeedback, self.toggleFeedback)
         self.Bind(wx.EVT_BUTTON, self.OnButtonCal, self.buttonCal)
         # end wxGlade
         
@@ -148,6 +148,49 @@ class regionEditor(wx.Frame):
         # Bind keyboard events
         self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown, self)
         self.canvas.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown, self.canvas)
+        
+        # Keep track of which buttons are toggled
+        # Since we are using bitmap buttons and they can't toggle
+        # Also load all buttons' bitmaps and set appropriate ones
+        self.toggleStates = {'vicon': False,
+                             'square': False,
+                             'poly': False,
+                             'dim': False,
+                             'feedback': False}
+        self.buttonBitmaps = {'vicon': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\streamMarkersIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'viconSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\streamMarkersIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'image': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\importImageIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'square': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\rectIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'squareSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\rectIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'poly': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\polyIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'polySel': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\polyIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'dim': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\dimensionIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'dimSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\dimensionIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'autobound': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\autoboundaryIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'feedback': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\audioFeedbackIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'feedbackSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\audioFeedbackIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'cal': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\calibPointIcon.bmp"), wx.BITMAP_TYPE_ANY)}
+        self.toggleVicon.SetBitmapLabel(self.buttonBitmaps['vicon'])
+        self.buttonImage.SetBitmapLabel(self.buttonBitmaps['image'])
+        self.toggleSquare.SetBitmapLabel(self.buttonBitmaps['square'])
+        self.togglePoly.SetBitmapLabel(self.buttonBitmaps['poly'])
+        self.toggleDim.SetBitmapLabel(self.buttonBitmaps['dim'])
+        self.buttonAutobound.SetBitmapLabel(self.buttonBitmaps['autobound'])
+        self.toggleFeedback.SetBitmapLabel(self.buttonBitmaps['feedback'])
+        self.buttonCal.SetBitmapLabel(self.buttonBitmaps['cal'])
         
         # Determine mapping of the canvas panel to the field
         canvasLen = self.canvas.GetSize()       # Initial size of canvas (pixels)
@@ -206,6 +249,9 @@ class regionEditor(wx.Frame):
         self.undoActions = collections.deque()
         self.redoActions = collections.deque()
         
+        # Track whether map is accurate to file
+        self.isSaved = True
+        
         # Add paint event handler to draw on the canvas
         # TODO: Fix problems here
         #self.canvas.Bind(wx.EVT_PAINT, self.OnCanvasPaint)
@@ -224,38 +270,45 @@ class regionEditor(wx.Frame):
         if self.fileName:
             self.ReadFile(self.fileName)
         self.Show()
-        self.DrawGrid()
+        self.RedrawCanvas()
     
     def __set_properties(self):
         # begin wxGlade: regionEditor.__set_properties
         self.SetTitle("Region Editor")
-        self.toggleVicon.SetMinSize((50, 50))
-        self.buttonImage.SetMinSize((50, 50))
-        self.toggleSquare.SetMinSize((50, 50))
-        self.togglePoly.SetMinSize((50, 50))
-        self.toggleDim.SetMinSize((50, 50))
-        self.buttonAutobound.SetMinSize((50, 50))
-        self.toggleFeedback.SetMinSize((50, 50))
-        self.buttonCal.SetMinSize((50, 50))
-        self.sidebar.SetMinSize((120, 400))
+        self.toggleVicon.SetMinSize((32, 32))
+        self.toggleVicon.SetToolTipString("Stream markers")
+        self.buttonImage.SetMinSize((32, 32))
+        self.buttonImage.SetToolTipString("Import image")
+        self.toggleSquare.SetMinSize((32, 32))
+        self.toggleSquare.SetToolTipString("Rectangle")
+        self.togglePoly.SetMinSize((32, 32))
+        self.togglePoly.SetToolTipString("Polygon")
+        self.toggleDim.SetMinSize((32, 32))
+        self.toggleDim.SetToolTipString("Set length or scale image")
+        self.buttonAutobound.SetMinSize((32, 32))
+        self.buttonAutobound.SetToolTipString("Autoboundary")
+        self.toggleFeedback.SetMinSize((32, 32))
+        self.toggleFeedback.SetToolTipString("Audio feedback")
+        self.buttonCal.SetMinSize((32, 32))
+        self.buttonCal.SetToolTipString("Calibrate")
         self.canvas.SetMinSize((800, 400))
         self.canvas.SetBackgroundColour(wx.Colour(255, 255, 255))
         # end wxGlade
     
     def __do_layout(self):
         # begin wxGlade: regionEditor.__do_layout
-        sizer_1 = wx.BoxSizer(wx.HORIZONTAL)
-        grid_sizer_1 = wx.GridSizer(4, 2, 5, 5)
-        grid_sizer_1.Add(self.toggleVicon, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        grid_sizer_1.Add(self.buttonImage, 1, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        grid_sizer_1.Add(self.toggleSquare, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        grid_sizer_1.Add(self.togglePoly, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        grid_sizer_1.Add(self.toggleDim, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        grid_sizer_1.Add(self.buttonAutobound, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        grid_sizer_1.Add(self.toggleFeedback, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        grid_sizer_1.Add(self.buttonCal, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
-        self.sidebar.SetSizer(grid_sizer_1)
-        sizer_1.Add(self.sidebar, 0, wx.EXPAND, 0)
+        sizer_1 = wx.BoxSizer(wx.VERTICAL)
+        sizer_13 = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_13.Add(self.toggleVicon, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_13.Add(self.buttonImage, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_13.Add(self.toggleSquare, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_13.Add(self.togglePoly, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_13.Add(self.toggleDim, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_13.Add(self.buttonAutobound, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_13.Add(self.toggleFeedback, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        sizer_13.Add(self.buttonCal, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
+        self.topbar.SetSizer(sizer_13)
+        sizer_1.Add(self.topbar, 0, wx.EXPAND, 0)
         sizer_1.Add(self.canvas, 1, wx.EXPAND, 0)
         self.SetSizer(sizer_1)
         sizer_1.Fit(self)
@@ -264,15 +317,17 @@ class regionEditor(wx.Frame):
     
     def OnClose(self, event):
         """Perform cleanup tasks and close the application."""
-        # Check if the closure can even be canceled
-        # TODO: Check if map is unsaved and ask if they want to save before closing
-        if not event or event.CanVeto():
+        # Check if the closure can even be canceled and
+        # if map is unsaved and ask if they want to save before closing
+        if not event or event.CanVeto() and not self.isSaved:
             dlg = wx.MessageDialog(self,
-                "Do you really want to close this application?",
-                "Confirm Exit", wx.OK|wx.CANCEL|wx.ICON_QUESTION)
+                "Do you want to save changes before closing?",
+                "Confirm Exit", wx.YES|wx.NO|wx.CANCEL|wx.ICON_QUESTION)
             result = dlg.ShowModal()
             dlg.Destroy()
-            if result == wx.ID_OK:
+            if result == wx.ID_YES:
+                self.OnMenuSave(None)
+            if result != wx.ID_CANCEL:
                 self.viconListener.stop()
                 # TODO: Check if vicon is indeed running, and put wait-notify
                 #       in to close port before closing GUI
@@ -282,14 +337,21 @@ class regionEditor(wx.Frame):
             self.Destroy()
     
     def OnToggleVicon(self, event):  # wxGlade: regionEditor.<event_handler>
+        # Change control values
+        self.toggleStates['vicon'] = not self.toggleStates['vicon']
+        self.menuMarkers.Check(self.toggleStates['vicon'])
+        
         # Switch Vicon streaming on or off based on state of toggle button
-        if self.toggleVicon.GetValue():
+        # Also switch button bitmap
+        if self.toggleStates['vicon']:
+            self.toggleVicon.SetBitmapLabel(self.buttonBitmaps['viconSel'])
             self.viconListener.start()
             
             # TODO: Add while loop to wait for data to come in
             #       If it times out print message
             #       If data comes in, zoom out to ensure all markers seen
         else:
+            self.toggleVicon.SetBitmapLabel(self.buttonBitmaps['vicon'])
             self.viconListener.stop()
             # Reinitialize thread to enable restarting it
             self.viconListener = vicon.ViconMarkerListener(self)
@@ -298,13 +360,30 @@ class regionEditor(wx.Frame):
         self.OnMenuImageImport(None)
     
     def OnToggleSquare(self, event):  # wxGlade: regionEditor.<event_handler>
-        self.ResetMapToggles(self.toggleSquare)
+        self.toggleStates['square'] = not self.toggleStates['square']
+        self.menuRect.Check(self.toggleStates['square'])
+        if self.toggleStates['square']:
+            self.toggleSquare.SetBitmapLabel(self.buttonBitmaps['squareSel'])
+        else:
+            self.toggleSquare.SetBitmapLabel(self.buttonBitmaps['square'])
+        self.ResetMapToggles('square')
     
     def OnTogglePoly(self, event):  # wxGlade: regionEditor.<event_handler>
-        self.ResetMapToggles(self.togglePoly)
+        self.toggleStates['poly'] = not self.toggleStates['poly']
+        self.menuPoly.Check(self.toggleStates['poly'])
+        if self.toggleStates['poly']:
+            self.togglePoly.SetBitmapLabel(self.buttonBitmaps['polySel'])
+        else:
+            self.togglePoly.SetBitmapLabel(self.buttonBitmaps['poly'])
+        self.ResetMapToggles('poly')
     
     def OnToggleDim(self, event):  # wxGlade: regionEditor.<event_handler>
-        self.ResetMapToggles(self.toggleDim)
+        self.toggleStates['dim'] = not self.toggleStates['dim']
+        if self.toggleStates['dim']:
+            self.toggleDim.SetBitmapLabel(self.buttonBitmaps['dimSel'])
+        else:
+            self.toggleDim.SetBitmapLabel(self.buttonBitmaps['dim'])
+        self.ResetMapToggles('dim')
     
     def OnButtonAutobound(self, event):  # wxGlade: regionEditor.<event_handler>
         self.AddToUndo()
@@ -312,11 +391,15 @@ class regionEditor(wx.Frame):
         self.RedrawCanvas()
     
     def OnToggleFeedback(self, event):  # wxGlade: regionEditor.<event_handler>
-        self.ResetMapToggles(self.toggleFeedback)
-        if self.toggleFeedback.GetValue():
+        self.toggleStates['feedback'] = not self.toggleStates['feedback']
+        self.ResetMapToggles('feedback')
+        if self.toggleStates['feedback']:
+            self.toggleFeedback.SetBitmapLabel( \
+                self.buttonBitmaps['feedbackSel'])
             self.dlgFeedback = FeedbackDialog(self)
             self.dlgFeedback.ShowModal()
         elif self.dlgFeedback:
+            self.toggleFeedback.SetBitmapLabel(self.buttonBitmaps['feedback'])
             self.dlgFeedback.OnClose(None)
     
     def OnButtonCal(self, event):  # wxGlade: regionEditor.<event_handler>
@@ -437,7 +520,7 @@ class regionEditor(wx.Frame):
         dialogSave.Destroy()
 
     def OnMenuExit(self, event):  # wxGlade: regionEditor.<event_handler>
-        self.OnClose(None)
+        self.Close()
 
     def OnMenuUndo(self, event):  # wxGlade: regionEditor.<event_handler>
         """Revert the most recent undoable change."""
@@ -482,11 +565,9 @@ class regionEditor(wx.Frame):
         self.RedrawCanvas()
 
     def OnMenuRect(self, event):  # wxGlade: regionEditor.<event_handler>
-        self.toggleSquare.SetValue(True)
         self.OnToggleSquare(None)
 
     def OnMenuPoly(self, event):  # wxGlade: regionEditor.<event_handler>
-        self.togglePoly.SetValue(True)
         self.OnTogglePoly(None)
 
     def OnMenuAddPoint(self, event):  # wxGlade: regionEditor.<event_handler>
@@ -498,12 +579,11 @@ class regionEditor(wx.Frame):
         event.Skip()
 
     def OnMenuMarkers(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuMarkers' not implemented"
-        event.Skip()
+        self.OnToggleVicon(None)
 
     def OnMenuMarkersClear(self, event):  # wxGlade: regionEditor.<event_handler>
         self.markerPoses = []
-        self.RedrawCanvas()
+        self.RedrawVicon()
 
     def OnMenuImageImport(self, event):  # wxGlade: regionEditor.<event_handler>
         # Start up open dialog
@@ -552,7 +632,7 @@ class regionEditor(wx.Frame):
             self.justDoubleClicked = False      # Reset flag
         
         # Creating a rectangular region
-        elif self.toggleSquare.GetValue():
+        elif self.toggleStates['square']:
             # Making the second corner of rectangle
             if self.polyVerts and pt.Dist(self.polyVerts[0]) > self.tolerance:
                 pt1 = Point(self.polyVerts[0].x, pt.y)
@@ -569,7 +649,7 @@ class regionEditor(wx.Frame):
                 self.polyVerts.append(pt)
 
         # Creating a polygonal region
-        elif self.togglePoly.GetValue():
+        elif self.toggleStates['poly']:
             # Closing the polygon to create a region
             if self.polyVerts and len(self.polyVerts) > 2 and \
                     pt == self.polyVerts[0]:
@@ -586,7 +666,7 @@ class regionEditor(wx.Frame):
                     dc.DrawLine(x1pix, y1pix, x2pix, y2pix)
 
         # Dimensioning region edge or setting background image scale
-        elif self.toggleDim.GetValue():
+        elif self.toggleStates['dim']:
             # First point on region to be clicked
             if (not self.polyVerts or isinstance(self.polyVerts, Point)) \
                     and iReg != -1 and iPt != -1:
@@ -738,7 +818,7 @@ class regionEditor(wx.Frame):
             # Clear all region selections
             else:
                 self.selectedRegions = []
-            self.RedrawCanvas()
+            self.RedrawVicon()
     
     def OnMouseLeftDClick(self, event):
         """Perform action based on current mode of operation."""
@@ -747,15 +827,15 @@ class regionEditor(wx.Frame):
         self.justDoubleClicked = True
         
         # Creating a polygonal region
-        if self.togglePoly.GetValue() and self.polyVerts and \
+        if self.toggleStates['poly'] and self.polyVerts and \
                 len(self.polyVerts) > 2:
             self.AddToUndo()
             self.CreateRegion()
         
         # Editing a region
-        if self.selectedRegions and not self.toggleSquare.GetValue() and \
-                not self.togglePoly.GetValue() and \
-                not self.toggleDim.GetValue():
+        if self.selectedRegions and not self.toggleStates['square'] and \
+                not self.toggleStates['poly'] and \
+                not self.toggleStates['dim']:
             # Unset double-click flag since event does not propagate here
             self.justDoubleClicked = False
             
@@ -772,8 +852,8 @@ class regionEditor(wx.Frame):
 
     def OnMouseRightUp(self, event):
         # Check if in region creation or dimensioning mode
-        if self.toggleSquare.GetValue() or self.togglePoly.GetValue() or \
-                self.toggleDim.GetValue():
+        if self.toggleStates['square'] or self.toggleStates['poly'] or \
+                self.toggleStates['dim']:
             self.ResetMapToggles()
         # TODO: else: open some kind of right-click menu at right-click point
 
@@ -799,8 +879,8 @@ class regionEditor(wx.Frame):
         
         # Set mouse cursor display and position as appropriate
         # Snapping to something
-        if self.toggleSquare.GetValue() or self.togglePoly.GetValue() or \
-                self.toggleDim.GetValue():
+        if self.toggleStates['square'] or self.toggleStates['poly'] or \
+                self.toggleStates['dim']:
             if snapped:
                 self.canvas.SetCursor(wx.StockCursor(wx.CURSOR_BULLSEYE))
             else:
@@ -819,7 +899,7 @@ class regionEditor(wx.Frame):
         
         # Draw lines to or around the mouse if necessary
         # Drawing rectangle
-        if self.toggleSquare.GetValue() and self.polyVerts:
+        if self.toggleStates['square'] and self.polyVerts:
             self.RedrawVicon()
             ptPix0 = self.Map2Pix(self.polyVerts[-1])
             dc.DrawLine(ptPix0[0], ptPix0[1], ptPix[0], ptPix0[1])
@@ -828,19 +908,24 @@ class regionEditor(wx.Frame):
             dc.DrawLine(ptPix0[0], ptPix[1], ptPix0[0], ptPix0[1])
         
         # Drawing a polygon
-        elif self.togglePoly.GetValue() and self.polyVerts:
+        elif self.toggleStates['poly'] and self.polyVerts:
             self.RedrawVicon()
             ptPix0 = self.Map2Pix(self.polyVerts[-1])
             dc.DrawLine(ptPix0[0], ptPix0[1], ptPix[0], ptPix[1])
         
-        # Dimensioning an image
-        elif self.toggleDim.GetValue() and self.polyVerts:
+        # Dimensioning region or image
+        elif self.toggleStates['dim'] and self.polyVerts:
             self.RedrawVicon()
-            ptPix0 = self.Map2Pix(self.regions[self.polyVerts[0]].pointArray[ \
-                self.polyVerts[1]])
+            # Dimensioning region
+            if isinstance(self.polyVerts, tuple):
+                ptPix0 = self.Map2Pix(self.regions[ \
+                    self.polyVerts[0]].pointArray[self.polyVerts[1]])
+            # Dimensioning background image
+            else:
+                ptPix0 = self.Map2Pix(self.polyVerts)
             dc.DrawLine(ptPix0[0], ptPix0[1], ptPix[0], ptPix[1])
         
-        # Dragging regions(s) or background image
+        # Dragging region point, or region(s) and/or background image
         elif event.LeftIsDown() and self.selectedRegions:
             self.leftClickPt, iReg, iPt, iEd, snapped = \
                 self.SnapRegions(self.leftClickPt)
@@ -892,8 +977,8 @@ class regionEditor(wx.Frame):
         
         # Backspace/Delete - Deletes selected regions
         if (keycode == wx.WXK_BACK or keycode == wx.WXK_DELETE) and \
-                self.selectedRegions and not self.togglePoly.GetValue() and \
-                not self.toggleSquare.GetValue():
+                self.selectedRegions and not self.toggleStates['poly'] and \
+                not self.toggleStates['square']:
             self.AddToUndo()
             self.selectedRegions.sort()
             while self.selectedRegions:
@@ -902,15 +987,15 @@ class regionEditor(wx.Frame):
         # Backspace/Delete - Removes last set point during region creation
         elif (keycode == wx.WXK_BACK or keycode == wx.WXK_DELETE) and \
                 self.polyVerts:
-            if self.toggleSquare.GetValue() or self.togglePoly.GetValue():
+            if self.toggleStates['square'] or self.toggleStates['poly']:
                 self.polyVerts.pop()
                 self.RedrawCanvas()
-            elif self.toggleDim.GetValue():
+            elif self.toggleStates['dim']:
                 self.polyVerts = []
         
         # Escape - Stops region/dimension creation
-        elif keycode == wx.WXK_ESCAPE and (self.toggleSquare.GetValue() or \
-                self.togglePoly.GetValue() or self.toggleDim.GetValue()):
+        elif keycode == wx.WXK_ESCAPE and (self.toggleStates['square'] or \
+                self.toggleStates['poly'] or self.toggleStates['dim']):
             self.ResetMapToggles()
         
         # Ctrl+n - New
@@ -949,7 +1034,7 @@ class regionEditor(wx.Frame):
     def OnEnterWindow(self, event):
         """Set the focus to the canvas to enable zooming."""
         self.canvas.SetFocus()
-        self.RedrawCanvas()
+        self.RedrawVicon()
     
     def OnLeaveWindow(self, event):
         """Unset the focus from the canvas to disable zooming."""
@@ -1001,6 +1086,8 @@ class regionEditor(wx.Frame):
         
         dc.SelectObject(wx.NullBitmap)
         
+        # Draw the canvas bitmap with overlayed "temporary" drawings
+        # such as markers, selection handles, partial regions
         self.RedrawVicon()
     
     def RedrawVicon(self):
@@ -1025,7 +1112,7 @@ class regionEditor(wx.Frame):
             self.DrawSelectionHandle(iReg, dc=dc)
         
         # Redraw partial region
-        if self.toggleSquare.GetValue() or self.togglePoly.GetValue():
+        if self.toggleStates['square'] or self.toggleStates['poly']:
             for iVert in range(len(self.polyVerts) - 1):
                 ptPix1 = self.Map2Pix(self.polyVerts[iVert])
                 ptPix2 = self.Map2Pix(self.polyVerts[iVert + 1])
@@ -1383,24 +1470,24 @@ class regionEditor(wx.Frame):
         """Clear all the other map-feature toggle buttons.
         Also resets region creation.
 
-        toggleStay - Toggle button object to retain state.
+        toggleStay - String indicating toggle button to retain state.
+            This must be a valid key to the dictionary toggleStates.
         """
         # Reset region creation and clear temporary lines
         self.polyVerts = []
-        self.RedrawCanvas()
+        self.RedrawVicon()
 
-        # Turn off all toggles and revert specified one
-        if toggleStay:
-            state = toggleStay.GetValue()
-        self.toggleSquare.SetValue(False)
-        self.togglePoly.SetValue(False)
-        self.toggleDim.SetValue(False)
-        if toggleStay:
-            toggleStay.SetValue(state)
+        # Turn off all map-building toggles except specified one
+        if self.toggleStates['square'] and toggleStay != 'square':
+            self.OnToggleSquare(None)
+        if self.toggleStates['poly'] and toggleStay != 'poly':
+            self.OnTogglePoly(None)
+        if self.toggleStates['dim'] and toggleStay != 'dim':
+            self.OnToggleDim(None)
 
     def CreateRegion(self):
         """Instantiate and create a region, perform cleanup actions.
-        Use polyVerts and polyAdjEdges to make the region and find transitions.
+        Use polyVerts to make the region and find transitions.
         """
         # Create region
         rName = 'r' + str(len(self.regions))
@@ -1416,7 +1503,6 @@ class regionEditor(wx.Frame):
         
         # Cleanup and draw
         self.polyVerts = []
-        self.polyAdjEdges = []
         self.RedrawCanvas()
     
     def DeleteRegion(self, iReg):
@@ -1669,6 +1755,7 @@ class regionEditor(wx.Frame):
         while len(self.undoActions) > self.unredoBufLen:
             self.undoActions.popleft()
         self.redoActions.clear()
+        self.isSaved = False
         # TODO: enable self.menuUndo
 
     def SnapPoint(self, pt):
@@ -1949,7 +2036,6 @@ class FeedbackDialog(wx.Dialog):
         kwds["style"] = wx.DEFAULT_DIALOG_STYLE
         wx.Dialog.__init__(self, *args, **kwds)
         self.buttonPrev = wx.Button(self, -1, "Previous")
-        self.buttonPick = wx.Button(self, -1, "Select")
         self.buttonNext = wx.Button(self, -1, "Next")
         self.chkbxIterate = wx.CheckBox(self, -1, "Automatically iterate points when marker is in position")
         self.radioboxOption = wx.RadioBox(self, -1, "Feedback Method", choices=["Speech", "Beeping"], majorDimension=1, style=wx.RA_SPECIFY_ROWS)
@@ -1959,7 +2045,6 @@ class FeedbackDialog(wx.Dialog):
         self.__do_layout()
 
         self.Bind(wx.EVT_BUTTON, self.OnButtonPrev, self.buttonPrev)
-        self.Bind(wx.EVT_BUTTON, self.OnButtonPick, self.buttonPick)
         self.Bind(wx.EVT_BUTTON, self.OnButtonNext, self.buttonNext)
         # end wxGlade
 
@@ -1987,7 +2072,6 @@ class FeedbackDialog(wx.Dialog):
         # begin wxGlade: FeedbackDialog.__set_properties
         self.SetTitle("Marker Placement")
         self.buttonPrev.SetMinSize((50, 50))
-        self.buttonPick.SetMinSize((50, 50))
         self.buttonNext.SetMinSize((50, 50))
         self.chkbxIterate.SetValue(1)
         self.radioboxOption.SetSelection(0)
@@ -1999,7 +2083,6 @@ class FeedbackDialog(wx.Dialog):
         sizerOptions = wx.BoxSizer(wx.VERTICAL)
         sizerButtons = wx.BoxSizer(wx.HORIZONTAL)
         sizerButtons.Add(self.buttonPrev, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
-        sizerButtons.Add(self.buttonPick, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
         sizerButtons.Add(self.buttonNext, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
         sizerOuter.Add(sizerButtons, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 0)
         sizerOptions.Add(self.chkbxIterate, 0, wx.ALL | wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_CENTER_VERTICAL, 5)
@@ -2014,7 +2097,8 @@ class FeedbackDialog(wx.Dialog):
     def OnClose(self, event):
         """Perform cleanup tasks and close the feedback dialog."""
         self.feedbackThread.stop()
-        self.parent.toggleFeedback.SetValue(False)
+        if self.parent.toggleStates['feedback']:
+            self.parent.OnToggleFeedback(None)
         # TODO: Add wait/notify to make sure thread ended
         self.Destroy()
 
@@ -2128,13 +2212,13 @@ class AudioFeedbackThread(threading.Thread):
         
         # Keep track of Vicon settings before opening this
         hadMarkers = len(self.regEd.markerPoses) > 0
-        wasStreaming = self.regEd.toggleVicon.GetValue()
+        wasStreaming = self.regEd.toggleStates['vicon']
         wasTracking = self.regEd.viconListener.trackMarkers
         self.oldSettings = (hadMarkers, wasStreaming, wasTracking)
         
         # Start Vicon streaming if necessary
-        if not self.regEd.toggleVicon.GetValue():
-            self.regEd.toggleVicon.SetValue(True)
+        if not self.regEd.toggleStates['vicon']:
+            self.regEd.OnToggleVicon(None)
             # TODO: Also check menu item
             self.regEd.viconListener.start()
         
@@ -2258,7 +2342,7 @@ class AudioFeedbackThread(threading.Thread):
         hadMarkers, wasStreaming, wasTracking = self.oldSettings
         self.regEd.viconListener.trackMarkers = wasTracking
         if not wasStreaming:
-            self.regEd.toggleVicon.SetValue(False)
+            self.regEd.OnToggleVicon(None)
             # TODO: Change checkbox too
             self.regEd.viconListener.stop()
             if not hadMarkers:
