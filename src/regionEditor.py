@@ -1479,11 +1479,17 @@ class regionEditor(wx.Frame):
 
         # Turn off all map-building toggles except specified one
         if self.toggleStates['square'] and toggleStay != 'square':
-            self.OnToggleSquare(None)
+            self.toggleStates['square'] = False
+            self.menuRect.Check(False)
+            self.toggleSquare.SetBitmapLabel(self.buttonBitmaps['square'])
         if self.toggleStates['poly'] and toggleStay != 'poly':
-            self.OnTogglePoly(None)
+            self.toggleStates['poly'] = False
+            self.menuPoly.Check(False)
+            self.togglePoly.SetBitmapLabel(self.buttonBitmaps['poly'])
         if self.toggleStates['dim'] and toggleStay != 'dim':
-            self.OnToggleDim(None)
+            self.toggleStates['dim'] = False
+            self.menuMarkers.Check(False)
+            self.toggleDim.SetBitmapLabel(self.buttonBitmaps['dim'])
 
     def CreateRegion(self):
         """Instantiate and create a region, perform cleanup actions.

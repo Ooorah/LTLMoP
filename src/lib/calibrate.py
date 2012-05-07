@@ -202,6 +202,37 @@ class CalibrationFrame(wx.Frame):
         # Add close event handler to cleanup before closing
         self.Bind(wx.EVT_CLOSE, self.OnClose)
         
+        # Keep track of which buttons are toggled
+        # Since we are using bitmap buttons and they can't toggle
+        # Also load all buttons' bitmaps and set appropriate ones
+        self.toggleStates = {'vicon': False,
+                             'addPoint': False,
+                             'deletePoint': False,
+                             'dimen': False}
+        self.buttonBitmaps = {'vicon': wx.Bitmap(os.path.join(os.getcwd(), \
+            "..\\images\\streamMarkersIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'viconSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            "..\\images\\streamMarkersIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'image': wx.Bitmap(os.path.join(os.getcwd(), \
+            "..\\images\\importImageIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'addPoint': wx.Bitmap(os.path.join(os.getcwd(), \
+            "..\\images\\addCalibPointIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'addPointSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            "..\\images\\addCalibPointIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'deletePoint': wx.Bitmap(os.path.join(os.getcwd(), \
+            "..\\images\\delCalibPointIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'deletePointSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            "..\\images\\delCalibPointIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'dimen': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\dimensionIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'dimSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            "images\\dimensionIconSel.bmp"), wx.BITMAP_TYPE_ANY)}
+        self.toggleVicon.SetBitmapLabel(self.buttonBitmaps['vicon'])
+        self.buttonImage.SetBitmapLabel(self.buttonBitmaps['image'])
+        self.toggleAddPoint.SetBitmapLabel(self.buttonBitmaps['addPoint'])
+        self.toggleDeletePoint.SetBitmapLabel(self.buttonBitmaps['deletePoint'])
+        self.toggleDimen.SetBitmapLabel(self.buttonBitmaps['dimen'])
+        
         # Determine mapping of the map panel to the field
         # Avoid difficulties by having same scale for x and y
         mapLen = self.map.GetSize() # Initial size of map panel (pixels)
@@ -407,20 +438,11 @@ class CalibrationFrame(wx.Frame):
         event.Skip()
 
     def OnMenuShowMarkers(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        # Switch Vicon streaming on or off based on state of menu checkbox
-        if self.menuShowMarkers.IsChecked():
-            self.toggleVicon.SetValue(True)
-            self.viconListener.start()
-        else:
-            self.viconListener.stop()
-            # Reinitialize thread to enable restarting it
-            self.viconListener = ViconMarkerListener(self)
-            self.toggleVicon.SetValue(False)
+        self.OnToggleVicon(None)
 
     def OnMenuClearMarkers(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        if self.menuShowMarkers.IsChecked():
-            self.toggleVicon.SetValue(False)
-            self.menuShowMarkers.Check(False)
+        if self.toggleStates['vicon']:
+            self.OnToggleVicon(None)
             self.viconListener.stop()
             self.viconListener = ViconMarkerListener(self)
             time.sleep(0.1)
@@ -443,8 +465,7 @@ class CalibrationFrame(wx.Frame):
             self.LoadBackgroundImage(filePath)
     
     def OnMenuDimen(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        print "OnMenuDimen"
-        event.Skip()
+        self.OnToggleDimen(None)
 
     def OnMenuClearImage(self, event):  # wxGlade: CalibrationFrame.<event_handler>
         self.backgroundImage = None
@@ -461,25 +482,27 @@ class CalibrationFrame(wx.Frame):
         event.Skip()
 
     def OnToggleVicon(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        # Change control values
+        self.toggleStates['vicon'] = not self.toggleStates['vicon']
+        self.menuMarkers.Check(self.toggleStates['vicon'])
+        
         # Switch Vicon streaming on or off based on state of toggle button
-        if self.toggleVicon.GetValue():
-            self.menuShowMarkers.Check(True)
+        if self.toggleStates['vicon']:
             self.viconListener.start()
         else:
             self.viconListener.stop()
             # Reinitialize thread to enable restarting it
             self.viconListener = ViconMarkerListener(self)
-            self.menuShowMarkers.Check(False)
 
     def OnButtonImage(self, event):  # wxGlade: CalibrationFrame.<event_handler>
         self.OnMenuLoadImage(None)
     
     def OnToggleAddPoint(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        self.ResetToggles(toggleKeep=self.toggleAddPoint)
+        self.ResetToggles(toggleKeep='addPoint')
         # TODO: When menu items are added for add point, flip on here
     
     def OnToggleDeletePoint(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        self.ResetToggles(toggleKeep=self.toggleDeletePoint)
+        self.ResetToggles(toggleKeep='deletePoint')
         # TODO: When menu items are added for delete point, flip on here
 
     def OnButtonEnterPoint(self, event):  # wxGlade: CalibrationFrame.<event_handler>
@@ -487,7 +510,7 @@ class CalibrationFrame(wx.Frame):
         event.Skip()
 
     def OnToggleDimen(self, event):  # wxGlade: CalibrationFrame.<event_handler>
-        self.ResetToggles(toggleKeep=self.toggleDimen)
+        self.ResetToggles(toggleKeep='dimen')
     
     def OnButtonSave(self, event):  # wxGlade: CalibrationFrame.<event_handler>
         self.OnMenuSave(None)
@@ -903,11 +926,17 @@ class CalibrationFrame(wx.Frame):
         toggleKeep - Toggle button to retain the value of
         """
         # Reset toggles
-        valueKeep = toggleKeep.GetValue()
-        self.toggleAddPoint.SetValue(False)
-        self.toggleDeletePoint.SetValue(False)
-        self.toggleDimen.SetValue(False)
-        toggleKeep.SetValue(valueKeep)
+        if self.toggleStates['addPoint'] and toggleStay != 'addPoint':
+            self.toggleStates['addPoint'] = False
+            self.toggleAddPoint.SetBitmapLabel(self.buttonBitmaps['addPoint'])
+        if self.toggleStates['deletePoint'] and toggleStay != 'deletePoint':
+            self.toggleStates['deletePoint'] = False
+            self.toggleDeletePoint.SetBitmapLabel( \
+                self.buttonBitmaps['deletePoint'])
+        if self.toggleStates['dimen'] and toggleStay != 'dimen':
+            self.toggleStates['dimen'] = False
+            self.menuShowMarkers.Check(False)
+            self.toggleDim.SetBitmapLabel(self.buttonBitmaps['dimen'])
         
         # Reset partial calibration point creation
         self.newCalibPt = [None, None]
