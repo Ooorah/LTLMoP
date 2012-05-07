@@ -205,27 +205,30 @@ class CalibrationFrame(wx.Frame):
         # Keep track of which buttons are toggled
         # Since we are using bitmap buttons and they can't toggle
         # Also load all buttons' bitmaps and set appropriate ones
+        ltlmopRoot = self.GetLtlmopRoot(sys.argv[0])
+        if not ltlmopRoot:
+            print "Cannot find LTLMoP root directory. Exiting..."
         self.toggleStates = {'vicon': False,
                              'addPoint': False,
                              'deletePoint': False,
                              'dimen': False}
-        self.buttonBitmaps = {'vicon': wx.Bitmap(os.path.join(os.getcwd(), \
-            "..\\images\\streamMarkersIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'viconSel': wx.Bitmap(os.path.join(os.getcwd(), \
-            "..\\images\\streamMarkersIconSel.bmp"), wx.BITMAP_TYPE_ANY),
-            'image': wx.Bitmap(os.path.join(os.getcwd(), \
-            "..\\images\\importImageIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'addPoint': wx.Bitmap(os.path.join(os.getcwd(), \
-            "..\\images\\addCalibPointIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'addPointSel': wx.Bitmap(os.path.join(os.getcwd(), \
-            "..\\images\\addCalibPointIconSel.bmp"), wx.BITMAP_TYPE_ANY),
-            'deletePoint': wx.Bitmap(os.path.join(os.getcwd(), \
-            "..\\images\\delCalibPointIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'deletePointSel': wx.Bitmap(os.path.join(os.getcwd(), \
-            "..\\images\\delCalibPointIconSel.bmp"), wx.BITMAP_TYPE_ANY),
-            'dimen': wx.Bitmap(os.path.join(os.getcwd(), \
+        self.buttonBitmaps = {'vicon': wx.Bitmap(os.path.join(ltlmopRoot, \
+            "images\\streamMarkersIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'viconSel': wx.Bitmap(os.path.join(ltlmopRoot, \
+            "images\\streamMarkersIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'image': wx.Bitmap(os.path.join(ltlmopRoot, \
+            "images\\importImageIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'addPoint': wx.Bitmap(os.path.join(ltlmopRoot, \
+            "images\\addCalibPointIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'addPointSel': wx.Bitmap(os.path.join(ltlmopRoot, \
+            "images\\addCalibPointIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'deletePoint': wx.Bitmap(os.path.join(ltlmopRoot, \
+            "images\\delCalibPointIcon.bmp"), wx.BITMAP_TYPE_ANY),
+            'deletePointSel': wx.Bitmap(os.path.join(ltlmopRoot, \
+            "images\\delCalibPointIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'dimen': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\dimensionIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'dimSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            'dimSel': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\dimensionIconSel.bmp"), wx.BITMAP_TYPE_ANY)}
         self.toggleVicon.SetBitmapLabel(self.buttonBitmaps['vicon'])
         self.buttonImage.SetBitmapLabel(self.buttonBitmaps['image'])
@@ -488,8 +491,10 @@ class CalibrationFrame(wx.Frame):
         
         # Switch Vicon streaming on or off based on state of toggle button
         if self.toggleStates['vicon']:
+            self.toggleVicon.SetBitmapLabel(self.buttonBitmaps['vicon'])
             self.viconListener.start()
         else:
+            self.toggleVicon.SetBitmapLabel(self.buttonBitmaps['vicon'])
             self.viconListener.stop()
             # Reinitialize thread to enable restarting it
             self.viconListener = ViconMarkerListener(self)
@@ -498,10 +503,23 @@ class CalibrationFrame(wx.Frame):
         self.OnMenuLoadImage(None)
     
     def OnToggleAddPoint(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        self.toggleStates['addPoint'] = not self.toggleStates['addPoint']
+        if self.toggleStates['addPoint']:
+            self.toggleAddPoint.SetBitmapLabel( \
+                self.buttonBitmaps['addPointSel'])
+        else:
+            self.toggleAddPoint.SetBitmapLabel(self.buttonBitmaps['addPoint'])
         self.ResetToggles(toggleKeep='addPoint')
         # TODO: When menu items are added for add point, flip on here
     
     def OnToggleDeletePoint(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        self.toggleStates['deletePoint'] = not self.toggleStates['deletePoint']
+        if self.toggleStates['deletePoint']:
+            self.toggleDeletePoint.SetBitmapLabel( \
+                self.buttonBitmaps['deletePointSel'])
+        else:
+            self.toggleDeletePoint.SetBitmapLabel( \
+                self.buttonBitmaps['deletePoint'])
         self.ResetToggles(toggleKeep='deletePoint')
         # TODO: When menu items are added for delete point, flip on here
 
@@ -510,6 +528,12 @@ class CalibrationFrame(wx.Frame):
         event.Skip()
 
     def OnToggleDimen(self, event):  # wxGlade: CalibrationFrame.<event_handler>
+        self.toggleStates['dimen'] = not self.toggleStates['dimen']
+        self.menuDimen.Check(self.toggleStates['dimen'])
+        if self.toggleStates['dimen']:
+            self.toggleDimen.SetBitmapLabel(self.buttonBitmaps['dimen'])
+        else:
+            self.toggleDimen.SetBitmapLabel(self.buttonBitmaps['dimen'])
         self.ResetToggles(toggleKeep='dimen')
     
     def OnButtonSave(self, event):  # wxGlade: CalibrationFrame.<event_handler>
@@ -527,7 +551,7 @@ class CalibrationFrame(wx.Frame):
             self.SnapPointMap(self.MapPix2M(ptPix))
         
         # Creating a calibration point
-        if self.toggleAddPoint.GetValue() and iCalibPt == -1:
+        if self.toggleStates['addPoint'] and iCalibPt == -1:
             # First point clicked for adding new point
             if not self.newCalibPt[1]:
                 self.newCalibPt[0] = pt
@@ -540,7 +564,7 @@ class CalibrationFrame(wx.Frame):
                 self.Redraw()
         
         # Removing a calibration point
-        elif self.toggleDeletePoint.GetValue() and iCalibPt != -1:
+        elif self.toggleStates['deletePoint'] and iCalibPt != -1:
             self.calibPoints.pop(iCalibPt)
             self.Redraw()
         
@@ -588,7 +612,7 @@ class CalibrationFrame(wx.Frame):
             self.SnapPointRef(self.RefPix2M(ptPix))
         
         # Creating a calibration point
-        if self.toggleAddPoint.GetValue() and iCalibPt == -1:
+        if self.toggleStates['addPoint'] and iCalibPt == -1:
             # First point clicked for adding new point
             if not self.newCalibPt[0]:
                 self.newCalibPt[1] = pt
@@ -601,12 +625,12 @@ class CalibrationFrame(wx.Frame):
                 self.Redraw()
         
         # Removing a calibration point
-        elif self.toggleDeletePoint.GetValue() and iCalibPt != -1:
+        elif self.toggleStates['deletePoint'] and iCalibPt != -1:
             self.calibPoints.pop(iCalibPt)
             self.Redraw()
         
         # Setting scale on background image
-        elif self.toggleDimen.GetValue() and self.InsideBackgroundImage(pt):
+        elif self.toggleStates['dimen'] and self.InsideBackgroundImage(pt):
             # First point on background image
             if not self.dimenPoint:
                 self.dimenPoint = pt
@@ -651,8 +675,9 @@ class CalibrationFrame(wx.Frame):
             self.RedrawRef()
         
         # Check if selecting or deselecting the background image
-        elif not self.toggleAddPoint.GetValue() and \
-                not self.toggleDeletePoint.GetValue():
+        elif not self.toggleStates['addPoint'] and \
+                not self.toggleStates['deletePoint'] and \
+                not self.toggleStates['dimen']:
             isInImage = self.InsideBackgroundImage(pt)
             # Selecting background image
             if (not event.CmdDown() or not self.backgroundIsSelected) and \
@@ -1223,6 +1248,21 @@ class CalibrationFrame(wx.Frame):
         v = pt - p0                     # Vector to point to project
         u = (v.Dot(s) / s.Dot(s)) * s   # Projected vector
         return p0 + u                   # Map back to global coordinates
+    
+    def GetLtlmopRoot(self, thisFile):
+        """Return a string of the absolute path to the project root directory.
+        
+        thisFile - String with the path to this file, should be found using
+                   sys.argv[0]
+        """
+        p = os.path.abspath(thisFile)
+        t = ""
+        while t != "src":
+            (p, t) = os.path.split(p)
+            if p == "":
+                return None
+
+        return os.path.join(p, "src")
     # end of class CalibrationFrame
 
 

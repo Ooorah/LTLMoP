@@ -152,36 +152,39 @@ class regionEditor(wx.Frame):
         # Keep track of which buttons are toggled
         # Since we are using bitmap buttons and they can't toggle
         # Also load all buttons' bitmaps and set appropriate ones
+        ltlmopRoot = self.GetLtlmopRoot(sys.argv[0])
+        if not ltlmopRoot:
+            print "Cannot find LTLMoP root directory. Exiting..."
         self.toggleStates = {'vicon': False,
                              'square': False,
                              'poly': False,
                              'dim': False,
                              'feedback': False}
-        self.buttonBitmaps = {'vicon': wx.Bitmap(os.path.join(os.getcwd(), \
+        self.buttonBitmaps = {'vicon': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\streamMarkersIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'viconSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            'viconSel': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\streamMarkersIconSel.bmp"), wx.BITMAP_TYPE_ANY),
-            'image': wx.Bitmap(os.path.join(os.getcwd(), \
+            'image': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\importImageIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'square': wx.Bitmap(os.path.join(os.getcwd(), \
+            'square': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\rectIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'squareSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            'squareSel': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\rectIconSel.bmp"), wx.BITMAP_TYPE_ANY),
-            'poly': wx.Bitmap(os.path.join(os.getcwd(), \
+            'poly': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\polyIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'polySel': wx.Bitmap(os.path.join(os.getcwd(), \
+            'polySel': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\polyIconSel.bmp"), wx.BITMAP_TYPE_ANY),
-            'dim': wx.Bitmap(os.path.join(os.getcwd(), \
+            'dim': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\dimensionIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'dimSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            'dimSel': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\dimensionIconSel.bmp"), wx.BITMAP_TYPE_ANY),
-            'autobound': wx.Bitmap(os.path.join(os.getcwd(), \
+            'autobound': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\autoboundaryIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'feedback': wx.Bitmap(os.path.join(os.getcwd(), \
+            'feedback': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\audioFeedbackIcon.bmp"), wx.BITMAP_TYPE_ANY),
-            'feedbackSel': wx.Bitmap(os.path.join(os.getcwd(), \
+            'feedbackSel': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\audioFeedbackIconSel.bmp"), wx.BITMAP_TYPE_ANY),
-            'cal': wx.Bitmap(os.path.join(os.getcwd(), \
+            'cal': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\calibPointIcon.bmp"), wx.BITMAP_TYPE_ANY)}
         self.toggleVicon.SetBitmapLabel(self.buttonBitmaps['vicon'])
         self.buttonImage.SetBitmapLabel(self.buttonBitmaps['image'])
@@ -267,7 +270,7 @@ class regionEditor(wx.Frame):
         self.Bind(wx.EVT_CLOSE, self.OnClose)
         
         # Display the GUI window and set up the map canvas
-        if self.fileName:
+        if self.fileName and os.path.exists(self.fileName):
             self.ReadFile(self.fileName)
         self.Show()
         self.RedrawCanvas()
@@ -490,6 +493,7 @@ class regionEditor(wx.Frame):
                     for face in faces:
                         singleTrans += "(" + str(face[0]) + "\t" + \
                             str(face[1]) + ")"
+                    singleTrans += "]"
                     transitionData.append(singleTrans)
             
             obstacleRegions = [r.name for r in self.regions if r.isObstacle]
@@ -1452,10 +1456,10 @@ class regionEditor(wx.Frame):
         for tData in data["Transitions"]:
             tData = re.sub('[\[\]\(\)]', '', tData)
             tData = tData.split();      # Separate on any whitespace
-            iReg1 = self.indexOfRegionWithName(tData[0])
-            iReg2 = self.indexOfRegionWithName(tData[1])
+            iReg1 = self.IndexOfRegionWithName(tData[0])
+            iReg2 = self.IndexOfRegionWithName(tData[1])
             # All transitions between regions
-            for i in range(2, len(transData), 2):
+            for i in range(2, len(tData), 2):
                 iFaceReg1 = int(tData[i])
                 iFaceReg2 = int(tData[i+1])
                 self.adjacent[iReg1][iReg2].append((iFaceReg1, iFaceReg2))
@@ -2035,7 +2039,22 @@ class regionEditor(wx.Frame):
         v = pt - p0                     # Vector to point to project
         u = (v.Dot(s) / s.Dot(s)) * s   # Projected vector
         return p0 + u                   # Map back to global coordinates
-# end of class RegionEditor
+
+    def GetLtlmopRoot(self, thisFile):
+        """Return a string of the absolute path to the project root directory.
+        
+        thisFile - String with the path to this file, should be found using
+                   sys.argv[0]
+        """
+        p = os.path.abspath(thisFile)
+        t = ""
+        while t != "src":
+            (p, t) = os.path.split(p)
+            if p == "":
+                return None
+
+        return os.path.join(p, "src")
+    # end of class RegionEditor
 
 
 class FeedbackDialog(wx.Dialog):

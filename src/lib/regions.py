@@ -319,7 +319,9 @@ class RegionFileInterface:
     def getBoundingBox(self):
         if self.regions == []:
             return None
-
+        
+        p = self.regions[0]
+        
         leftMargin = min([pt.x for region in self.regions for pt in region.getPoints()])
         topMargin = min([pt.y for region in self.regions for pt in region.getPoints()])
         rightExtent = max([pt.x for region in self.regions for pt in region.getPoints()]) - leftMargin
@@ -455,8 +457,8 @@ class RegionFileInterface:
                 for i in range(2, len(transData), 2):
                     ip1 = int(transData[i])
                     ip2 = int(transData[i % len(self.regions[region1].pointArray)])
-                    p1 = self.regions[region1].pointArray(ip1)
-                    p2 = self.regions[region1].pointArray(ip2)
+                    p1 = self.regions[region1].pointArray[ip1]
+                    p2 = self.regions[region1].pointArray[ip2]
                     faces.append(tuple(sorted((p1, p2))))
                 
                 # Don't assume bidirectional transitions
@@ -531,6 +533,8 @@ class RegionFileInterface:
         rdnew['points'] = points
         rdnew['holeList'] = holeList
         xOff, yOff = offsets
+        xOff = int(xOff * 1000)
+        yOff = int(yOff * 1000)
         rdnew['position'] = (leftMargin + xOff, topMargin + yOff)
         rdnew['size'] = (rightExtent, downExtent)
         
