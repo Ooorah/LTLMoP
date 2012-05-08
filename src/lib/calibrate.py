@@ -47,13 +47,17 @@ class CalibrateHelper:
         if self.proj.currentConfig.name != "calibrate":
             print "(ERROR) Calibration can only be run on a specfication file with a calibration configuration.\nPlease use ConfigEditor to calibrate a configuration."
             sys.exit(3)
-
-        self.calibrationWizard = self.doCalibration()
     
     def doCalibration(self):
         # Run the calibration GUI
         # It will call outputTransformationMatrix when calibration is saved
-        calibGUI = CalibrationFrame(self)
+        app = wx.PySimpleApp(0)
+        wx.InitAllImageHandlers()
+        calibGUI = CalibrationFrame(None, -1, "")
+        calibGUI.Initialize(parent=self)
+        app.SetTopWindow(calibGUI)
+        app.MainLoop()
+        
     
     def outputTransformationMatrix(self, T):
         """
@@ -157,33 +161,6 @@ class CalibrationFrame(wx.Frame):
         self.Bind(wx.EVT_BUTTON, self.OnButtonEnterPoint, id=wx.ID_OK)
         # end wxGlade
         
-        # Check that parent object was passed in correctly
-        print args[0].__class__.__name__
-        if len(args) > 0 and args[0].__class__.__name__ == 'regionEditor':
-            self.parent = args[0]
-            self.isCalibHelper = False
-            print "CalibrationFrame opening in regionEditor mode."
-            if self.parent.regions:
-                self.regions = self.parent.regions
-            else:
-                print "No regions defined. Exiting calibration."
-                self.Destroy()
-                return
-        elif len(args) > 0 and args[0].__class__.__name__ == 'CalibrateHelper':
-            self.parent = args[0]
-            self.isCalibHelper = True
-            print "CalibrationFrame opening in specEditor mode."
-            if self.parent.proj.rfi.regions:
-                self.regions
-            else:
-                print "No regions defined. Exiting calibration."
-                self.Destroy()
-                return
-        else:
-            print "No or invalid parent object passed in. Exiting calibration."
-            self.Destroy()
-            return
-        
         # Bind mouse events
         self.map.Bind(wx.EVT_LEFT_DOWN, self.OnMapMouseLeftDown, self.map)
         self.map.Bind(wx.EVT_LEFT_UP, self.OnMapMouseLeftUp, self.map)
@@ -203,6 +180,46 @@ class CalibrationFrame(wx.Frame):
         
         # Add close event handler to cleanup before closing
         self.Bind(wx.EVT_CLOSE, self.OnClose)
+        
+    def Initialize(self, parent=None):
+        """Perform the initialization part that requires use of either
+        specEditor or regionEditor modes to be set, and access to parent.
+        
+        parent - Calling object, must be either CalibrateHelper or regionEditor
+        """
+        # Check that parent object was passed in correctly
+        if parent.__class__.__name__ == 'regionEditor':
+            self.parent = parent
+            self.isCalibHelper = False
+            print "CalibrationFrame opening in regionEditor mode."
+            if self.parent.regions:
+                self.regions = self.parent.regions
+            else:
+                print "ERROR: No regions defined. Exiting calibration."
+                self.Destroy()
+                return
+        elif parent.__class__.__name__ == 'CalibrateHelper':
+            self.parent = parent
+            self.isCalibHelper = True
+            print "CalibrationFrame opening in specEditor mode."
+            if self.parent.proj.rfi.regions:
+                self.regions = []
+                for reg in self.parent.proj.rfi.regions:
+                    verts = []
+                    for pt in reg.getPoints():
+                        verts.append(Point(float(pt.x), float(pt.y)))
+                    self.regions.append(Region(points=verts, name=reg.name, \
+                        holes=reg.holeList, rgb=reg.color, \
+                        obst=reg.isObstacle))
+            else:
+                print "ERROR: No regions defined. Exiting calibration."
+                self.Destroy()
+                return
+        else:
+            print "ERROR: None or invalid parent object passed in to " + \
+                "CalibrationFrame. Exiting calibration."
+            self.Destroy()
+            return
         
         # Keep track of which buttons are toggled
         # Since we are using bitmap buttons and they can't toggle
@@ -244,8 +261,7 @@ class CalibrationFrame(wx.Frame):
         # Determine mapping of the map panel to the field
         # Avoid difficulties by having same scale for x and y
         mapLen = self.map.GetSize() # Initial size of map panel (pixels)
-        # Initial range of field (xmin, xmax, ymin, ymax)
-        xmin, xmax, ymin, ymax = self.GetBoundingBox()
+        xmin, xmax, ymin, ymax = self.GetBoundingBox()  # Initial range of map
         # pose = pixPose * scale + offset
         # Note: y-pixels and y-pose have opposite directions
         xScale = (xmax - xmin) / float(mapLen[0])
@@ -256,8 +272,11 @@ class CalibrationFrame(wx.Frame):
         self.mapScale = Point(maxScale, -maxScale)
         self.mapOffset = Point(xOffset, yOffset)
         # Determine initial mapping of the reference panel to the field
-        # Initially defines a 1:1 mapping (at least scale/offset-wise) to map
+        # Initially chooses to view whole field as opposed to 1:1 ratio to map
+        # since when called from specEditor the map regions are defined with
+        # pixels (so coordinates are in the hundreds)
         refLen = self.ref.GetSize() # Initial size of reference panel (pixels)
+        xmin, xmax, ymin, ymax = (-3.0, 9.0, -3.0, 3.0) # Initial range of ref
         xScale = (xmax - xmin) / float(refLen[0])
         yScale = (ymax - ymin) / float(refLen[1])
         maxScale = max(xScale, yScale)
@@ -1272,11 +1291,5 @@ class CalibrationFrame(wx.Frame):
 
 
 if __name__ == "__main__":
-    app = wx.PySimpleApp(0)
-    wx.InitAllImageHandlers()
-    if len(sys.argv) > 1:
-        calib = CalibrationFrame(None, -1, sys.argv[1])
-    else:
-        calib = CalibrationFrame(None, -1)
-    app.SetTopWindow(calib)
-    app.MainLoop()
+    calib = CalibrateHelper()
+    calib.doCalibration()

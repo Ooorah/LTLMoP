@@ -33,58 +33,64 @@ class regionEditor(wx.Frame):
         # Menu Bar
         self.RegionEditor_menubar = wx.MenuBar()
         self.filemenu = wx.Menu()
-        self.menuNew = wx.MenuItem(self.filemenu, wx.NewId(), "New", "", wx.ITEM_NORMAL)
+        self.menuNew = wx.MenuItem(self.filemenu, wx.NewId(), "&New\tCTRL-N", "", wx.ITEM_NORMAL)
         self.filemenu.AppendItem(self.menuNew)
-        self.menuOpen = wx.MenuItem(self.filemenu, wx.NewId(), "Open", "", wx.ITEM_NORMAL)
+        self.menuOpen = wx.MenuItem(self.filemenu, wx.NewId(), "&Open\tCTRL-O", "", wx.ITEM_NORMAL)
         self.filemenu.AppendItem(self.menuOpen)
-        self.menuSave = wx.MenuItem(self.filemenu, wx.NewId(), "Save", "", wx.ITEM_NORMAL)
+        self.menuSave = wx.MenuItem(self.filemenu, wx.NewId(), "&Save\tCTRL-S", "", wx.ITEM_NORMAL)
         self.filemenu.AppendItem(self.menuSave)
-        self.menuSaveAs = wx.MenuItem(self.filemenu, wx.NewId(), "Save As", "", wx.ITEM_NORMAL)
+        self.menuSaveAs = wx.MenuItem(self.filemenu, wx.NewId(), "Save &As", "", wx.ITEM_NORMAL)
         self.filemenu.AppendItem(self.menuSaveAs)
         self.filemenu.AppendSeparator()
-        self.menuExit = wx.MenuItem(self.filemenu, wx.NewId(), "Exit", "", wx.ITEM_NORMAL)
+        self.menuExit = wx.MenuItem(self.filemenu, wx.NewId(), "&Quit\tCTRL-Q", "", wx.ITEM_NORMAL)
         self.filemenu.AppendItem(self.menuExit)
-        self.RegionEditor_menubar.Append(self.filemenu, "File")
+        self.RegionEditor_menubar.Append(self.filemenu, "&File")
         self.menuEdit = wx.Menu()
-        self.menuUndo = wx.MenuItem(self.menuEdit, wx.NewId(), "Undo", "", wx.ITEM_NORMAL)
+        self.menuUndo = wx.MenuItem(self.menuEdit, wx.NewId(), "&Undo\tCTRL-Z", "", wx.ITEM_NORMAL)
         self.menuEdit.AppendItem(self.menuUndo)
-        self.menuRedo = wx.MenuItem(self.menuEdit, wx.NewId(), "Redo", "", wx.ITEM_NORMAL)
+        self.menuRedo = wx.MenuItem(self.menuEdit, wx.NewId(), "&Redo\tCTRL-Y", "", wx.ITEM_NORMAL)
         self.menuEdit.AppendItem(self.menuRedo)
-        self.RegionEditor_menubar.Append(self.menuEdit, "Edit")
+        self.menuSelectAll = wx.MenuItem(self.menuEdit, wx.NewId(), "Select &All\tCTRL-A", "", wx.ITEM_NORMAL)
+        self.menuEdit.AppendItem(self.menuSelectAll)
+        self.menuEditRegion = wx.MenuItem(self.menuEdit, wx.NewId(), "&Edit Region\tCTRL-E", "", wx.ITEM_NORMAL)
+        self.menuEdit.AppendItem(self.menuEditRegion)
+        self.menuDeleteRegion = wx.MenuItem(self.menuEdit, wx.NewId(), "D&elete Region\tDEL", "", wx.ITEM_NORMAL)
+        self.menuEdit.AppendItem(self.menuDeleteRegion)
+        self.RegionEditor_menubar.Append(self.menuEdit, "&Edit")
         self.menuDrawing = wx.Menu()
-        self.menuAutobound = wx.MenuItem(self.menuDrawing, wx.NewId(), "Autoboundary", "", wx.ITEM_NORMAL)
+        self.menuAutobound = wx.MenuItem(self.menuDrawing, wx.NewId(), "&Autoboundary", "", wx.ITEM_NORMAL)
         self.menuDrawing.AppendItem(self.menuAutobound)
-        self.menuRect = wx.MenuItem(self.menuDrawing, wx.NewId(), "Rectangle", "", wx.ITEM_CHECK)
+        self.menuRect = wx.MenuItem(self.menuDrawing, wx.NewId(), "&Rectangle\tR", "", wx.ITEM_CHECK)
         self.menuDrawing.AppendItem(self.menuRect)
-        self.menuPoly = wx.MenuItem(self.menuDrawing, wx.NewId(), "Polygon", "", wx.ITEM_CHECK)
+        self.menuPoly = wx.MenuItem(self.menuDrawing, wx.NewId(), "&Polygon\tP", "", wx.ITEM_CHECK)
         self.menuDrawing.AppendItem(self.menuPoly)
         self.menuDrawing.AppendSeparator()
-        self.menuAddPoint = wx.MenuItem(self.menuDrawing, wx.NewId(), "Add Point", "", wx.ITEM_CHECK)
+        self.menuAddPoint = wx.MenuItem(self.menuDrawing, wx.NewId(), "&Create Point\tC", "", wx.ITEM_CHECK)
         self.menuDrawing.AppendItem(self.menuAddPoint)
-        self.menuRemPoint = wx.MenuItem(self.menuDrawing, wx.NewId(), "Remove Point", "", wx.ITEM_CHECK)
+        self.menuRemPoint = wx.MenuItem(self.menuDrawing, wx.NewId(), "&Delete Point\tD", "", wx.ITEM_CHECK)
         self.menuDrawing.AppendItem(self.menuRemPoint)
-        self.RegionEditor_menubar.Append(self.menuDrawing, "Drawing")
+        self.RegionEditor_menubar.Append(self.menuDrawing, "&Drawing")
         self.menuView = wx.Menu()
-        self.menuMarkers = wx.MenuItem(self.menuView, wx.NewId(), "Stream Markers", "", wx.ITEM_CHECK)
+        self.menuMarkers = wx.MenuItem(self.menuView, wx.NewId(), "&Stream Markers", "", wx.ITEM_CHECK)
         self.menuView.AppendItem(self.menuMarkers)
-        self.menuMarkersClear = wx.MenuItem(self.menuView, wx.NewId(), "Clear Markers", "", wx.ITEM_NORMAL)
+        self.menuMarkersClear = wx.MenuItem(self.menuView, wx.NewId(), "Clear &Markers", "", wx.ITEM_NORMAL)
         self.menuView.AppendItem(self.menuMarkersClear)
         self.menuView.AppendSeparator()
-        self.menuImageImport = wx.MenuItem(self.menuView, wx.NewId(), "Import Background Image", "", wx.ITEM_NORMAL)
+        self.menuImageImport = wx.MenuItem(self.menuView, wx.NewId(), "&Import Background Image", "", wx.ITEM_NORMAL)
         self.menuView.AppendItem(self.menuImageImport)
-        self.menuImageClear = wx.MenuItem(self.menuView, wx.NewId(), "Clear Background Image", "", wx.ITEM_NORMAL)
+        self.menuImageClear = wx.MenuItem(self.menuView, wx.NewId(), "Clear &Background Image", "", wx.ITEM_NORMAL)
         self.menuView.AppendItem(self.menuImageClear)
         self.menuView.AppendSeparator()
-        self.menuFeedback = wx.MenuItem(self.menuView, wx.NewId(), "Audio Feedback", "", wx.ITEM_CHECK)
+        self.menuFeedback = wx.MenuItem(self.menuView, wx.NewId(), "Audio &Feedback", "", wx.ITEM_CHECK)
         self.menuView.AppendItem(self.menuFeedback)
         self.menuView.AppendSeparator()
-        self.menuCalibrate = wx.MenuItem(self.menuView, wx.NewId(), "Calibrate", "", wx.ITEM_NORMAL)
+        self.menuCalibrate = wx.MenuItem(self.menuView, wx.NewId(), "&Calibrate", "", wx.ITEM_NORMAL)
         self.menuView.AppendItem(self.menuCalibrate)
-        self.RegionEditor_menubar.Append(self.menuView, "Tools")
+        self.RegionEditor_menubar.Append(self.menuView, "&Tools")
         self.helpmenu = wx.Menu()
-        self.menuAbout = wx.MenuItem(self.helpmenu, wx.NewId(), "About", "", wx.ITEM_NORMAL)
+        self.menuAbout = wx.MenuItem(self.helpmenu, wx.NewId(), "&About", "", wx.ITEM_NORMAL)
         self.helpmenu.AppendItem(self.menuAbout)
-        self.RegionEditor_menubar.Append(self.helpmenu, "Help")
+        self.RegionEditor_menubar.Append(self.helpmenu, "&Help")
         self.SetMenuBar(self.RegionEditor_menubar)
         # Menu Bar end
         self.topbar = wx.Panel(self, -1)
@@ -108,6 +114,9 @@ class regionEditor(wx.Frame):
         self.Bind(wx.EVT_MENU, self.OnMenuExit, self.menuExit)
         self.Bind(wx.EVT_MENU, self.OnMenuUndo, self.menuUndo)
         self.Bind(wx.EVT_MENU, self.OnMenuRedo, self.menuRedo)
+        self.Bind(wx.EVT_MENU, self.OnMenuSelectAll, self.menuSelectAll)
+        self.Bind(wx.EVT_MENU, self.OnMenuEditRegion, self.menuEditRegion)
+        self.Bind(wx.EVT_MENU, self.OnMenuDeleteRegion, self.menuDeleteRegion)
         self.Bind(wx.EVT_MENU, self.OnMenuAutobound, self.menuAutobound)
         self.Bind(wx.EVT_MENU, self.OnMenuRect, self.menuRect)
         self.Bind(wx.EVT_MENU, self.OnMenuPoly, self.menuPoly)
@@ -283,11 +292,11 @@ class regionEditor(wx.Frame):
         self.toggleVicon.SetMinSize((32, 32))
         self.toggleVicon.SetToolTipString("Stream markers")
         self.buttonImage.SetMinSize((32, 32))
-        self.buttonImage.SetToolTipString("Import image")
+        self.buttonImage.SetToolTipString("Import image (CTRL+I)")
         self.toggleSquare.SetMinSize((32, 32))
-        self.toggleSquare.SetToolTipString("Rectangle")
+        self.toggleSquare.SetToolTipString("Rectangle (R)")
         self.togglePoly.SetMinSize((32, 32))
-        self.togglePoly.SetToolTipString("Polygon")
+        self.togglePoly.SetToolTipString("Polygon (P)")
         self.toggleDim.SetMinSize((32, 32))
         self.toggleDim.SetToolTipString("Set length or scale image")
         self.buttonAutobound.SetMinSize((32, 32))
@@ -567,7 +576,24 @@ class regionEditor(wx.Frame):
             # TODO: if not self.redoActions: disable self.menuRedo
             # TODO: enable self.menuUndo
             self.RedrawCanvas()
+    
+    def OnMenuSelectAll(self, event):  # wxGlade: regionEditor.<event_handler>
+        self.selectedRegions = range(len(self.regions))
+        self.RedrawVicon()
 
+    def OnMenuEditRegion(self, event):  # wxGlade: regionEditor.<event_handler>
+        # Edit most recently selected region
+        if self.selectedRegions:
+            iReg = self.selectedRegions.pop()
+            self.selectedRegions = [iReg]
+            self.EditRegion(iReg)
+
+    def OnMenuDeleteRegion(self, event):  # wxGlade: regionEditor.<event_handler>
+        self.AddToUndo()
+        self.selectedRegions.sort()
+        while self.selectedRegions:
+            self.DeleteRegion(self.selectedRegions.pop())
+    
     def OnMenuAutobound(self, event):  # wxGlade: regionEditor.<event_handler>
         self.AddToUndo()
         self.Autoboundary()
@@ -1004,17 +1030,14 @@ class regionEditor(wx.Frame):
         if (keycode == wx.WXK_BACK or keycode == wx.WXK_DELETE) and \
                 self.selectedRegions and not self.toggleStates['poly'] and \
                 not self.toggleStates['square']:
-            self.AddToUndo()
-            self.selectedRegions.sort()
-            while self.selectedRegions:
-                self.DeleteRegion(self.selectedRegions.pop())
+            self.OnMenuDeleteRegion(None)
         
         # Backspace/Delete - Removes last set point during region creation
         elif (keycode == wx.WXK_BACK or keycode == wx.WXK_DELETE) and \
                 self.polyVerts:
             if self.toggleStates['square'] or self.toggleStates['poly']:
                 self.polyVerts.pop()
-                self.RedrawCanvas()
+                self.RedrawVicon()
             elif self.toggleStates['dim']:
                 self.polyVerts = []
         
@@ -1049,8 +1072,37 @@ class regionEditor(wx.Frame):
         
         # Ctrl+a - Select All
         elif event.CmdDown() and keycode == 65:
-            self.selectedRegions = range(len(self.regions))
-            self.RedrawCanvas()
+            self.OnMenuSelectAll(None)
+        
+        # Ctrl+i - Import Background Image
+        elif event.CmdDown() and keycode == 73:
+            self.OnMenuImageImport(None)
+        
+        # Ctrl+e - Edit Region
+        elif event.CmdDown() and keycode == 69:
+            self.OnMenuEditRegion(None)
+        
+        # r - Rectangle Creation Mode
+        elif keycode == 82:
+            if not self.toggleStates['square']:
+                self.OnToggleSquare(None)
+        
+        # p - Polygon Creation Mode
+        elif keycode == 80:
+            if not self.toggleStates['poly']:
+                self.OnTogglePoly(None)
+        
+        # c - Create Point Mode
+        elif keycode == 67:
+            if not self.toggleStates['addPoint']:
+                self.menuAddPoint.Check(True)
+                self.OnMenuAddPoint(None)
+        
+        # d - Delete Point Mode
+        elif keycode == 68:
+            if not self.toggleStates['remPoint']:
+                self.menuRemPoint.Check(True)
+                self.OnMenuRemPoint(None)
         
         # Pass event on so other key combinations still work
         else:
