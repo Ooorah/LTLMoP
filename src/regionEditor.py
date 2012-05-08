@@ -159,7 +159,9 @@ class regionEditor(wx.Frame):
                              'square': False,
                              'poly': False,
                              'dim': False,
-                             'feedback': False}
+                             'feedback': False,
+                             'addPoint': False,
+                             'remPoint': False}
         self.buttonBitmaps = {'vicon': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\streamMarkersIcon.bmp"), wx.BITMAP_TYPE_ANY),
             'viconSel': wx.Bitmap(os.path.join(ltlmopRoot, \
@@ -401,9 +403,10 @@ class regionEditor(wx.Frame):
                 self.buttonBitmaps['feedbackSel'])
             self.dlgFeedback = FeedbackDialog(self)
             self.dlgFeedback.ShowModal()
-        elif self.dlgFeedback:
+        else:
             self.toggleFeedback.SetBitmapLabel(self.buttonBitmaps['feedback'])
-            self.dlgFeedback.OnClose(None)
+            if self.dlgFeedback:
+                self.dlgFeedback.OnClose(None)
     
     def OnButtonCal(self, event):  # wxGlade: regionEditor.<event_handler>
         self.ResetMapToggles()
@@ -577,12 +580,12 @@ class regionEditor(wx.Frame):
         self.OnTogglePoly(None)
 
     def OnMenuAddPoint(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuAddPoint' not implemented"
-        event.Skip()
+        self.toggleStates['addPoint'] = not self.toggleStates['addPoint']
+        self.ResetMapToggles('addPoint')
 
     def OnMenuRemPoint(self, event):  # wxGlade: regionEditor.<event_handler>
-        print "Event handler `OnMenuRemPoint' not implemented"
-        event.Skip()
+        self.toggleStates['remPoint'] = not self.toggleStates['remPoint']
+        self.ResetMapToggles('remPoint')
 
     def OnMenuMarkers(self, event):  # wxGlade: regionEditor.<event_handler>
         self.OnToggleVicon(None)
@@ -754,6 +757,18 @@ class regionEditor(wx.Frame):
                         self.RedrawCanvas()
                     self.polyVerts = []
         
+        # Adding a point to a region
+        elif self.toggleStates['addPoint']:
+            # Check that valid region edge is selected
+            if iReg != -1 and iEd != -1:
+                self.AddPointToRegion(pt, iReg, iEd)
+        
+        # Removing a point from a region
+        elif self.toggleStates['remPoint']:
+            # Check that valid region point is selected
+            if iReg != -1 and iPt != -1:
+                self.DeletePointFromRegion(iReg, iPt)
+        
         # Dragging region(s) or image or vertices or panning map view
         elif pt.Dist(self.leftClickPt) > self.tolerance:
             self.leftClickPt, iReg, iPt, iEd, snapped = \
@@ -841,7 +856,9 @@ class regionEditor(wx.Frame):
         # Editing a region
         if self.selectedRegions and not self.toggleStates['square'] and \
                 not self.toggleStates['poly'] and \
-                not self.toggleStates['dim']:
+                not self.toggleStates['dim'] and \
+                not self.toggleStates['addPoint'] and \
+                not self.toggleStates['remPoint']:
             # Unset double-click flag since event does not propagate here
             self.justDoubleClicked = False
             
@@ -859,7 +876,8 @@ class regionEditor(wx.Frame):
     def OnMouseRightUp(self, event):
         # Check if in region creation or dimensioning mode
         if self.toggleStates['square'] or self.toggleStates['poly'] or \
-                self.toggleStates['dim']:
+                self.toggleStates['dim'] or self.toggleStates['addPoint'] or \
+                self.toggleStates['remPoint']:
             self.ResetMapToggles()
         # TODO: else: open some kind of right-click menu at right-click point
 
@@ -886,7 +904,8 @@ class regionEditor(wx.Frame):
         # Set mouse cursor display and position as appropriate
         # Snapping to something
         if self.toggleStates['square'] or self.toggleStates['poly'] or \
-                self.toggleStates['dim']:
+                self.toggleStates['dim'] or self.toggleStates['addPoint'] or \
+                self.toggleStates['remPoint']:
             if snapped:
                 self.canvas.SetCursor(wx.StockCursor(wx.CURSOR_BULLSEYE))
             else:
@@ -942,9 +961,9 @@ class regionEditor(wx.Frame):
                 # Draw walls that would connect to the new position
                 nPts = len(self.regions[iReg].pointArray)
                 ptPix0 = self.Map2Pix( \
-                    self.regions[iReg].pointArray[iPt - 1 % nPts])
+                    self.regions[iReg].pointArray[(iPt - 1) % nPts])
                 ptPix1 = self.Map2Pix( \
-                    self.regions[iReg].pointArray[iPt + 1 % nPts])
+                    self.regions[iReg].pointArray[(iPt + 1) % nPts])
                 dc.DrawLine(ptPix0[0], ptPix0[1], ptPix[0], ptPix[1])
                 dc.DrawLine(ptPix1[0], ptPix1[1], ptPix[0], ptPix[1])
             
@@ -1067,8 +1086,10 @@ class regionEditor(wx.Frame):
         # Create bitmap to draw to
         width, height = self.canvas.GetSize()
         self.canvasBitmap = wx.EmptyBitmap(width, height)
+        #self.canvasBitmap.UseAlpha()
         dc = wx.MemoryDC()
         dc.SelectObject(self.canvasBitmap)
+        dc.BeginDrawing()
         border = [(0, 0), (width, 0), (width, height), (0, height)]
         dc.SetBrush(wx.Brush(wx.WHITE, wx.SOLID))
         dc.SetPen(wx.Pen(wx.WHITE, 1, wx.SOLID))
@@ -1090,6 +1111,7 @@ class regionEditor(wx.Frame):
         for iReg in range(1, len(self.adjacent)):
             self.DrawAdjacencies(iReg, dc=dc)
         
+        dc.EndDrawing()
         dc.SelectObject(wx.NullBitmap)
         
         # Draw the canvas bitmap with overlayed "temporary" drawings
@@ -1496,6 +1518,12 @@ class regionEditor(wx.Frame):
             self.toggleStates['dim'] = False
             self.menuMarkers.Check(False)
             self.toggleDim.SetBitmapLabel(self.buttonBitmaps['dim'])
+        if self.toggleStates['addPoint'] and toggleStay != 'addPoint':
+            self.toggleStates['addPoint'] = False
+            self.menuAddPoint.Check(False)
+        if self.toggleStates['remPoint'] and toggleStay != 'remPoint':
+            self.toggleStates['remPoint'] = False
+            self.menuRemPoint.Check(False)
 
     def CreateRegion(self):
         """Instantiate and create a region, perform cleanup actions.
@@ -1565,6 +1593,31 @@ class regionEditor(wx.Frame):
                 elif thisRegFace == iEdge:
                     self.adjacent[jReg][iReg].\
                         append((otherRegFace, thisRegFace + 1))
+        
+        # Only need to redraw Vicon since the only visible difference
+        # should be if the region is currently selected (selection handle)
+        self.RedrawVicon()
+    
+    def DeletePointFromRegion(self, iReg, iPt):
+        """Remove a vertex from the region.
+        
+        iRegion - Int, index of region to modify
+        iPt - Int, index of the point to remove
+        """
+        # Check if removal is possible
+        if len(self.regions[iReg].pointArray) <= 3:
+            print "WARNING: Cannot have fewer than 3 points in a region."
+            print "         Point removal canceled."
+            return
+        
+        # Remove point
+        self.regions[iReg].pointArray.pop(iPt)
+        
+        # Update adjacencies
+        self.RecalcAdjacency(iReg)
+        
+        # Redraw regions
+        self.RedrawCanvas()
     
     def EditRegion(self, iReg):
         """Show the edit region dialog.
@@ -2096,12 +2149,25 @@ class FeedbackDialog(wx.Dialog):
         self.Bind(wx.EVT_CLOSE, self.OnClose)
 
         # Save reference to RegionEditor GUI
-        if len(args) > 0:
+        if len(args) > 0 and isinstance(args[0], regionEditor):
             self.parent = args[0]
+            if not self.parent.regions:
+                print "ERROR: No regions defined prior to requesting feedback."
+                if self.parent.toggleStates['feedback']:
+                    self.parent.OnToggleFeedback(None)
+                self.Destroy()
+                return
         else:
-            print "Warning: FeedbackDialog will not work without " + \
+            print "ERROR: FeedbackDialog will not work without " + \
                 "reference to RegionEditor GUI as first parameter."
-            self.parent = None
+            self.Destroy()
+            return
+        
+        # Keep track of Vicon settings before opening this
+        hadMarkers = len(self.parent.markerPoses) > 0
+        wasStreaming = self.parent.toggleStates['vicon']
+        wasTracking = self.parent.viconListener.trackMarkers
+        self.oldSettings = (hadMarkers, wasStreaming, wasTracking)
 
         # Track current point
         self.chkbxIterate.SetValue(True)
@@ -2109,8 +2175,9 @@ class FeedbackDialog(wx.Dialog):
         self.currPt = 0
 
         # Start audio feedback thread
-        self.feedbackThread = AudioFeedbackThread(self, self.parent)
-        self.feedbackThread.start()
+        if self.parent:
+            self.feedbackThread = AudioFeedbackThread(self, self.parent)
+            self.feedbackThread.start()
 
     def __set_properties(self):
         # begin wxGlade: FeedbackDialog.__set_properties
@@ -2144,6 +2211,18 @@ class FeedbackDialog(wx.Dialog):
         if self.parent.toggleStates['feedback']:
             self.parent.OnToggleFeedback(None)
         # TODO: Add wait/notify to make sure thread ended
+        
+        # Reset to old settings
+        hadMarkers, wasStreaming, wasTracking = self.oldSettings
+        self.parent.viconListener.trackMarkers = wasTracking
+        if not wasStreaming and self.parent.toggleStates['vicon']:
+            self.parent.OnToggleVicon(None)
+            # TODO: Change checkbox too
+            if not hadMarkers:
+                time.sleep(1)   # Wait for Vicon listener to close
+                self.parent.markerPoses = []
+        self.parent.RedrawVicon()
+        
         self.Destroy()
 
     def OnButtonPrev(self, event):  # wxGlade: FeedbackDialog.<event_handler>
@@ -2160,10 +2239,6 @@ class FeedbackDialog(wx.Dialog):
             else:
                 self.currReg = len(self.parent.regions) - 1
             self.currPt = len(self.parent.regions[self.currReg].pointArray) - 1
-
-    def OnButtonPick(self, event):  # wxGlade: FeedbackDialog.<event_handler>
-        #self.parent.Raise()
-        print "Select not yet implemented."
 
     def OnButtonNext(self, event):  # wxGlade: FeedbackDialog.<event_handler>
         """Move on to next point."""
@@ -2254,17 +2329,10 @@ class AudioFeedbackThread(threading.Thread):
         self.fbDia = feedbackDialog
         self.regEd = regEditor
         
-        # Keep track of Vicon settings before opening this
-        hadMarkers = len(self.regEd.markerPoses) > 0
-        wasStreaming = self.regEd.toggleStates['vicon']
-        wasTracking = self.regEd.viconListener.trackMarkers
-        self.oldSettings = (hadMarkers, wasStreaming, wasTracking)
-        
         # Start Vicon streaming if necessary
         if not self.regEd.toggleStates['vicon']:
             self.regEd.OnToggleVicon(None)
             # TODO: Also check menu item
-            self.regEd.viconListener.start()
         
         # Tell marker listener to track the moving markers
         self.regEd.viconListener.trackMarkers = True
@@ -2298,7 +2366,7 @@ class AudioFeedbackThread(threading.Thread):
         self.close.clear()
         while not self.close.isSet():
             soundOption = self.fbDia.radioboxOption.GetSelection()
-            if not self.fbDia.chkbxMute.GetValue():
+            if self.regEd.regions and not self.fbDia.chkbxMute.GetValue():
                 # Get distance from closest marker to point of interest
                 intPt = self.regEd.regions[self.fbDia.currReg].\
                     pointArray[self.fbDia.currPt]
@@ -2381,17 +2449,6 @@ class AudioFeedbackThread(threading.Thread):
         """Signal for the thread to end."""
         self.engine.stop()
         self.close.set()
-        
-        # Reset to old settings
-        hadMarkers, wasStreaming, wasTracking = self.oldSettings
-        self.regEd.viconListener.trackMarkers = wasTracking
-        if not wasStreaming:
-            self.regEd.OnToggleVicon(None)
-            # TODO: Change checkbox too
-            self.regEd.viconListener.stop()
-            if not hadMarkers:
-                time.sleep(1)   # Wait for Vicon listener to close
-                self.regEd.markerPoses = []
         
         # Clear poses for drawing
         self.regEd.feedbackPoses = []

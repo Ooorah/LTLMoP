@@ -153,6 +153,7 @@ class CalibrationFrame(wx.Frame):
         self.Bind(wx.EVT_BUTTON, self.OnToggleAddPoint, self.toggleAddPoint)
         self.Bind(wx.EVT_BUTTON, self.OnToggleDeletePoint, self.toggleDeletePoint)
         self.Bind(wx.EVT_BUTTON, self.OnToggleDimen, self.toggleDimen)
+        self.Bind(wx.EVT_BUTTON, self.OnButtonSave, self.buttonSave)
         self.Bind(wx.EVT_BUTTON, self.OnButtonEnterPoint, id=wx.ID_OK)
         # end wxGlade
         
@@ -167,6 +168,7 @@ class CalibrationFrame(wx.Frame):
             else:
                 print "No regions defined. Exiting calibration."
                 self.Destroy()
+                return
         elif len(args) > 0 and args[0].__class__.__name__ == 'CalibrateHelper':
             self.parent = args[0]
             self.isCalibHelper = True
@@ -176,11 +178,11 @@ class CalibrationFrame(wx.Frame):
             else:
                 print "No regions defined. Exiting calibration."
                 self.Destroy()
+                return
         else:
             print "No or invalid parent object passed in. Exiting calibration."
-            self.parent = None
-            self.regions = []
             self.Destroy()
+            return
         
         # Bind mouse events
         self.map.Bind(wx.EVT_LEFT_DOWN, self.OnMapMouseLeftDown, self.map)
@@ -229,12 +231,15 @@ class CalibrationFrame(wx.Frame):
             'dimen': wx.Bitmap(os.path.join(ltlmopRoot, \
             "images\\dimensionIcon.bmp"), wx.BITMAP_TYPE_ANY),
             'dimSel': wx.Bitmap(os.path.join(ltlmopRoot, \
-            "images\\dimensionIconSel.bmp"), wx.BITMAP_TYPE_ANY)}
+            "images\\dimensionIconSel.bmp"), wx.BITMAP_TYPE_ANY),
+            'save': wx.Bitmap(os.path.join(ltlmopRoot, \
+            "images\\saveIcon.bmp"), wx.BITMAP_TYPE_ANY)}
         self.toggleVicon.SetBitmapLabel(self.buttonBitmaps['vicon'])
         self.buttonImage.SetBitmapLabel(self.buttonBitmaps['image'])
         self.toggleAddPoint.SetBitmapLabel(self.buttonBitmaps['addPoint'])
         self.toggleDeletePoint.SetBitmapLabel(self.buttonBitmaps['deletePoint'])
         self.toggleDimen.SetBitmapLabel(self.buttonBitmaps['dimen'])
+        self.buttonSave.SetBitmapLabel(self.buttonBitmaps['save'])
         
         # Determine mapping of the map panel to the field
         # Avoid difficulties by having same scale for x and y
@@ -951,14 +956,14 @@ class CalibrationFrame(wx.Frame):
         toggleKeep - Toggle button to retain the value of
         """
         # Reset toggles
-        if self.toggleStates['addPoint'] and toggleStay != 'addPoint':
+        if self.toggleStates['addPoint'] and toggleKeep != 'addPoint':
             self.toggleStates['addPoint'] = False
             self.toggleAddPoint.SetBitmapLabel(self.buttonBitmaps['addPoint'])
-        if self.toggleStates['deletePoint'] and toggleStay != 'deletePoint':
+        if self.toggleStates['deletePoint'] and toggleKeep != 'deletePoint':
             self.toggleStates['deletePoint'] = False
             self.toggleDeletePoint.SetBitmapLabel( \
                 self.buttonBitmaps['deletePoint'])
-        if self.toggleStates['dimen'] and toggleStay != 'dimen':
+        if self.toggleStates['dimen'] and toggleKeep != 'dimen':
             self.toggleStates['dimen'] = False
             self.menuShowMarkers.Check(False)
             self.toggleDim.SetBitmapLabel(self.buttonBitmaps['dimen'])
