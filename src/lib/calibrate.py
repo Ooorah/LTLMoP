@@ -25,6 +25,7 @@ import numpy
 import _transformations
 import vicon
 from regionsPoints import Region, Point
+import time
 
 class CalibrateHelper:
     def __init__(self, *args, **kwds):
@@ -70,7 +71,7 @@ class CalibrateHelper:
         else:
             UDPSock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
             UDPSock.sendto(output, self.configEditorPort)
-        yield
+        return True
 
 
 class CalibrationFrame(wx.Frame):
@@ -268,8 +269,12 @@ class CalibrationFrame(wx.Frame):
         yScale = (ymax - ymin) / float(mapLen[1])
         maxScale = max(xScale, yScale)
         xOffset = xmin
-        yOffset = ymax
-        self.mapScale = Point(maxScale, -maxScale)
+        if self.isCalibHelper:
+            self.mapScale = Point(maxScale, maxScale)
+            yOffset = ymin
+        else:
+            self.mapScale = Point(maxScale, -maxScale)
+            yOffset = ymax
         self.mapOffset = Point(xOffset, yOffset)
         # Determine initial mapping of the reference panel to the field
         # Initially chooses to view whole field as opposed to 1:1 ratio to map
@@ -324,7 +329,7 @@ class CalibrationFrame(wx.Frame):
         
         # Display the GUI window and set up the map canvas
         self.Show()
-        self.RedrawMap()
+        self.Redraw()
     
     def __set_properties(self):
         # begin wxGlade: CalibrationFrame.__set_properties
@@ -422,13 +427,13 @@ class CalibrationFrame(wx.Frame):
         # if the points chosen are not perfect
         allowShear = not self.chkbxShear.IsChecked()
         
-        # Get tranformation matrix such that
-        # regPt = T * mapPt
-        T = _transformations.affine_matrix_from_points(mapPts, regPts, \
-            shear=allowShear)
-        
         # If being used by regionEditor
         if not self.isCalibHelper:
+            # Get tranformation matrix such that
+            # regPt = T * mapPt
+            T = _transformations.affine_matrix_from_points(mapPts, regPts, \
+                shear=allowShear)
+                
             # Apply transformation to all region points
             self.parent.AddToUndo()
             for reg in self.parent.regions:
@@ -440,7 +445,12 @@ class CalibrationFrame(wx.Frame):
         
         # If being used by CalibrateHelper
         else:
-            self.parent.outputTransformationMatrix(T)
+            # Get tranformation matrix such that
+            # regPt = T * mapPt
+            T = _transformations.affine_matrix_from_points(regPts, mapPts, \
+                shear=allowShear)
+            
+            success = self.parent.outputTransformationMatrix(T)
         
         # Quit calibration
         self.Close()
@@ -511,7 +521,7 @@ class CalibrationFrame(wx.Frame):
     def OnToggleVicon(self, event):  # wxGlade: CalibrationFrame.<event_handler>
         # Change control values
         self.toggleStates['vicon'] = not self.toggleStates['vicon']
-        self.menuMarkers.Check(self.toggleStates['vicon'])
+        self.menuShowMarkers.Check(self.toggleStates['vicon'])
         
         # Switch Vicon streaming on or off based on state of toggle button
         if self.toggleStates['vicon']:
@@ -521,7 +531,7 @@ class CalibrationFrame(wx.Frame):
             self.toggleVicon.SetBitmapLabel(self.buttonBitmaps['vicon'])
             self.viconListener.stop()
             # Reinitialize thread to enable restarting it
-            self.viconListener = ViconMarkerListener(self)
+            self.viconListener = vicon.ViconMarkerListener(self)
 
     def OnButtonImage(self, event):  # wxGlade: CalibrationFrame.<event_handler>
         self.OnMenuLoadImage(None)
@@ -626,8 +636,8 @@ class CalibrationFrame(wx.Frame):
     
     def OnRefMouseLeftDown(self, event):
         """Save downclick point on reference panel for future use."""
-        self.refLeftClickPt, iCalibPt, iReg = \
-            self.SnapPointMap(self.RefPix2M(event.GetPosition()))
+        self.refLeftClickPt, iCalibPt = \
+            self.SnapPointRef(self.RefPix2M(event.GetPosition()))
     
     def OnRefMouseLeftUp(self, event):
         """React to the finalization of the left click on the map."""
@@ -640,7 +650,7 @@ class CalibrationFrame(wx.Frame):
             # First point clicked for adding new point
             if not self.newCalibPt[0]:
                 self.newCalibPt[1] = pt
-                self.RedrawMap()
+                self.RedrawRef()
             
             # Finalizing calibration point (second point clicked)
             else:

@@ -420,7 +420,8 @@ class regionEditor(wx.Frame):
     def OnButtonCal(self, event):  # wxGlade: regionEditor.<event_handler>
         self.ResetMapToggles()
         self.AddToUndo()
-        calibGUI = calibrate.CalibrationFrame(self)
+        calibGUI = calibrate.CalibrationFrame(None, -1, "")
+        calibGUI.Initialize(parent=self)
     
     def OnMenuNew(self, event):  # wxGlade: regionEditor.<event_handler>
         self.AddToUndo()
@@ -559,6 +560,7 @@ class regionEditor(wx.Frame):
             self.adjacent = action.stateAdjacent
             # TODO: if not self.undoActions: disable self.menuUndo
             # TODO: enable self.menuRedo
+            self.selectedRegions = []
             self.RedrawCanvas()
 
     def OnMenuRedo(self, event):  # wxGlade: regionEditor.<event_handler>
@@ -645,6 +647,8 @@ class regionEditor(wx.Frame):
         self.backgroundImage = None
         self.backgroundFile = ""
         self.backgroundPosition = None
+        if -1 in self.selectedRegions:
+            self.selectedRegions.remove(-1)
         self.RedrawCanvas()
     
     def OnMenuAbout(self, event):  # wxGlade: regionEditor.<event_handler>
