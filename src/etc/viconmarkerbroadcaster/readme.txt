@@ -10,3 +10,9 @@ Steps:
     ViconDataStreamSDK_CPP.dll
 5. Make sure Vicon is on.
 6. Run executable (recommend not running through Visual Studio to speed up the program).
+
+Alternative:
+4. Move ViconDataStreamSDK_CPP.dll to /bin/Release/
+5. Make a shortcut to ViconMarkerBroadcaster.exe and save it to a more accessible location.
+6. Make sure Vicon is on.
+7. Run executable through shortcut.
